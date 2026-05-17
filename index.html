@@ -908,8 +908,11 @@ function _initAlunoView() {
 
     // Agenda + presencas + full student list for agenda display
     if (sv.agendaReadable) {
-      agendas   = sv.agendaReadable.agendas   || [];
-      presencas = sv.agendaReadable.presencas || {};
+      agendas          = sv.agendaReadable.agendas        || [];
+      presencas        = sv.agendaReadable.presencas      || {};
+      excecoes         = sv.agendaReadable.excecoes       || {};
+      if (sv.agendaReadable.horariosConfig)  horariosConfig  = sv.agendaReadable.horariosConfig;
+      if (sv.agendaReadable.diasPermitidos)  diasPermitidos  = sv.agendaReadable.diasPermitidos;
       if (sv.agendaReadable.students) {
         // Populate all students (name only) so the aluno can see who's in each slot
         students = sv.agendaReadable.students.map(function(st){
@@ -970,7 +973,7 @@ function syncStudentView(studentAuthUid, appStudentId, opts) {
   Object.keys(presencas).forEach(function(k){
     if (k.indexOf(appStudentId + '_') === 0) sPres[k] = presencas[k];
   });
-  var agendaWrite = ref.child('agendaReadable').set({ agendas: fullAgendas, students: fullStudents, presencas: sPres, updatedAt: Date.now() });
+  var agendaWrite = ref.child('agendaReadable').set({ agendas: fullAgendas, students: fullStudents, presencas: sPres, excecoes: excecoes, horariosConfig: horariosConfig, diasPermitidos: diasPermitidos, updatedAt: Date.now() });
   var saldoWrite = ref.child('reposicoes').set(getReposicoes(appStudentId));
 
   return Promise.all([profileWrite, treinoWrite, agendaWrite, saldoWrite]).then(function(){
