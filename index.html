@@ -424,6 +424,7 @@ td{border-bottom:1px solid var(--border);vertical-align:middle;}
     <button class="ham-item" data-tab="agenda" onclick="showTab('agenda')"><span class="ham-icon">&#128197;</span>Agenda</button>
     <button class="ham-item" data-tab="financeiro" onclick="showTab('financeiro')"><span class="ham-icon">&#128176;</span>Financeiro</button>
     <div class="ham-div"></div>
+    <button class="ham-item" id="ham-btn-perfil" data-tab="perfil" style="display:none;" onclick="showTab('perfil')"><span class="ham-icon">&#128100;</span>Meu Perfil</button>
     <button class="ham-item" id="ham-btn-admin" style="display:none;" onclick="openAdminPanel();closeHamburger()"><span class="ham-icon">&#128737;</span>Painel Admin</button>
     <button class="ham-item" onclick="openConfiguracoes();closeHamburger()"><span class="ham-icon">&#9881;&#65039;</span>Configura&ccedil;&otilde;es</button>
   </div>
@@ -568,6 +569,15 @@ td{border-bottom:1px solid var(--border);vertical-align:middle;}
       <div id="hist-panel" style="background:var(--card);padding:16px 18px;margin-bottom:20px;border-radius:10px;"></div>
       <div id="rel-mensal-panel" style="margin-bottom:20px;"></div>
       <div id="fin-tbody"></div>
+    </div>
+
+    <!-- PERFIL DO ALUNO -->
+    <div id="tab-perfil" style="display:none;">
+      <div class="tab-header">
+        <div class="page-title">Meu <span>Perfil</span></div>
+        <div class="page-sub">Seus dados de cadastro (somente leitura)</div>
+      </div>
+      <div id="perfil-content" style="padding-bottom:32px;"></div>
     </div>
 
     <!-- CADASTRO -->
@@ -833,12 +843,14 @@ function canViewTab(tab) { return isPersonal() || _ACL_TABS_BLOCKED.indexOf(tab)
 function canDo(action)   { return isPersonal() || _ACL_ACTS_BLOCKED.indexOf(action) === -1; }
 function _aclToast(msg)  { toast(msg || 'Acesso restrito ao personal trainer.'); }
 function applyMenuVisibility() {
-  var blocked = isAluno() ? _ACL_TABS_BLOCKED : [];
+  var blocked = isAluno() ? _ACL_TABS_BLOCKED : ['perfil'];
   document.querySelectorAll('.ham-item[data-tab]').forEach(function(b){
     b.style.display = blocked.indexOf(b.getAttribute('data-tab')) !== -1 ? 'none' : '';
   });
   var adminBtn = document.getElementById('ham-btn-admin');
   if(adminBtn) adminBtn.style.display = isAdmin() ? '' : 'none';
+  var perfilBtn = document.getElementById('ham-btn-perfil');
+  if(perfilBtn) perfilBtn.style.display = isAluno() ? '' : 'none';
 }
 // -----------------------------------------------------------------------
 
@@ -2694,7 +2706,7 @@ function closeHamburger(){
 }
 function showTab(tab){
   if(!canViewTab(tab)){ _aclToast('Área restrita ao personal trainer.'); return; }
-  ['dashboard','alunos','treino','agenda','financeiro'].forEach(function(t){
+  ['dashboard','alunos','treino','agenda','financeiro','perfil'].forEach(function(t){
     var el2=document.getElementById('tab-'+t);if(el2)el2.style.display=t===tab?'':'none';
   });
   var tc=document.getElementById('tab-cadastro');if(tc)tc.style.display='none';
@@ -2710,6 +2722,7 @@ function showTab(tab){
       else if(tab==='treino'){renderTabTreino();}
       else if(tab==='agenda'){renderCalendar();}
       else if(tab==='financeiro'){renderFinanceiro();}
+      else if(tab==='perfil'){renderAlunoPerfil();}
     }catch(e){}
   },20);
 }
@@ -6953,6 +6966,69 @@ function renderAlunoTreino() {
     out+='</div>';
   });
   list.innerHTML=out;
+}
+
+function renderAlunoPerfil() {
+  var el = document.getElementById('perfil-content'); if(!el) return;
+  var ctx = getAlunoContext();
+  var s = ctx ? students.find(function(x){ return x.id === ctx.studentId && !x.deleted; }) : null;
+
+  if(!s){
+    el.innerHTML = '<div style="padding:32px 16px;text-align:center;color:var(--white-dim);font-size:0.85rem;">Dados ainda não disponíveis.<br>Aguarde sincronização do seu personal.</div>';
+    return;
+  }
+
+  function row(label, value) {
+    if(!value) return '';
+    return '<div class="detail-item"><div class="detail-item-label">'+label+'</div><div class="detail-item-value">'+escapeHtml(String(value))+'</div></div>';
+  }
+
+  // Dias/horários da agenda
+  var agsAluno = agendas.filter(function(a){ return a.alunoId === s.id && !a.deleted && !a.validUntil; });
+  var diasNome = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  var horariosStr = agsAluno.length
+    ? agsAluno.map(function(a){
+        return (a.days||[]).map(function(d){ return diasNome[d]; }).join(', ')+' · '+a.inicio;
+      }).join(' | ')
+    : '—';
+
+  var vef = getVencimentoEfetivo(s);
+  var statusLabel = s.status==='em dia'?'Em dia':s.status==='vencendo'?'Vencendo':s.status==='atrasado'?'Inativo':s.status==='aguardando'?'Aguardando início':'—';
+
+  var out = '';
+
+  // Bloco dados pessoais
+  out += '<div style="background:var(--card);border-radius:10px;padding:16px;margin-bottom:10px;">';
+  out += '<div style="font-family:Raleway,sans-serif;font-size:0.55rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--accent-l);margin-bottom:12px;">Dados pessoais</div>';
+  out += '<div class="detail-grid">';
+  out += row('Nome', s.nome);
+  out += row('Email', s.email);
+  out += row('Telefone', s.telefone);
+  out += row('CPF', s.cpf);
+  out += row('Nascimento', fmtDate(s.nascimento));
+  out += row('Objetivo', s.objetivo);
+  if(s.obs) out += '<div class="detail-item" style="grid-column:1/-1">'+
+    '<div class="detail-item-label">Obs. de saúde</div>'+
+    '<div class="detail-item-value">'+escapeHtml(s.obs)+'</div></div>';
+  out += '</div></div>';
+
+  // Bloco plano
+  out += '<div style="background:var(--card);border-radius:10px;padding:16px;margin-bottom:10px;">';
+  out += '<div style="font-family:Raleway,sans-serif;font-size:0.55rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--accent-l);margin-bottom:12px;">Plano</div>';
+  out += '<div class="detail-grid">';
+  out += row('Plano', getPlanNome(s.plano));
+  out += row('Modalidade', s.modalidade);
+  out += row('Início', fmtDate(s.inicio));
+  out += row('Vencimento', fmtDate(vef));
+  out += row('Status', statusLabel);
+  out += '<div class="detail-item"><div class="detail-item-label">Valor</div><div class="detail-item-value">'+(getPlanoValorTotal(s)>0?'R$ '+Math.round(getPlanoValorTotal(s)).toLocaleString('pt-BR'):'—')+'</div></div>';
+  out += row('Dias e horários', horariosStr);
+  out += '</div></div>';
+
+  // Aviso somente leitura
+  out += '<div style="padding:12px 16px;font-size:0.72rem;color:var(--white-dim);text-align:center;border:1px solid var(--border);border-radius:8px;">Para corrigir algum dado, entre em contato com seu personal trainer.</div>';
+
+  el.innerHTML = out;
 }
 // ─────────────────────────────────────────────────────────────────────────
 
