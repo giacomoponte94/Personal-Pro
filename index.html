@@ -1437,9 +1437,16 @@ function _startSync(){
       console.log('[GP Sync] dirty='+isDirty+' — verificando coleções por coleção');
       Object.keys(_COL_MAP).forEach(function(lsKey){
         var col=_COL_MAP[lsKey]; var cd=allCols[col];
-        // Se essa coleção tem flag dirty própria → sempre enviar (mudança local explícita)
+        // Se essa coleção tem flag dirty própria — mas só envia se cloud não for mais novo.
         var colDirty=false; try{ colDirty=localStorage.getItem('gp-dirty-'+lsKey)==='1'; }catch(e){}
-        if(colDirty){ console.log('[GP Sync] Push forçado (col dirty):', col); _pushCol(lsKey); return; }
+        if(colDirty){
+          var _cSts2=cd?(cd.serverTs||0):0; var _lSts2=_colServerTs[col]||0;
+          var _cLts2=cd?(cd.localTs||0):0;  var _lLts2=_colLocalTs[col]||0;
+          var _cloudNewerForDirty=(_cSts2&&_lSts2)?(_cSts2>_lSts2):(_cLts2>_lLts2);
+          if(_cloudNewerForDirty){ console.log('[GP Sync] col dirty mas cloud mais novo — aplicando:',col); _applyCol(col,lsKey,cd,true); }
+          else { console.log('[GP Sync] Push forçado (col dirty):', col); _pushCol(lsKey); }
+          return;
+        }
         var cSts=cd?(cd.serverTs||0):0; var lSts=_colServerTs[col]||0;
         var cLts=cd?(cd.localTs||0):0;  var lLts=_colLocalTs[col]||0;
         var cloudIsNewer=(cSts&&lSts) ? (cSts>lSts) : (cLts>lLts);
@@ -1555,22 +1562,38 @@ function _flushIfPending(){
 function _onAppForeground(){
   try{ firebase.database().goOnline(); }catch(e){}
   if(!_initialized) return;
-  var dirty=false; try{ dirty=localStorage.getItem('gp-dirty')==='1'; }catch(e){}
-  if(dirty){ console.log('[GP Sync] Foreground: dirty — enviando'); _pushAllCols(); return; }
+  // Always check cloud timestamps before pushing — never blindly overwrite newer cloud data.
   _colsRef.once('value').then(function(snap){
     var allCols=snap.val()||{};
-    var anyNewer=false;
+    var anyChanged=false;
     Object.keys(_COL_MAP).forEach(function(lsKey){
-      var col=_COL_MAP[lsKey]; var cd=allCols[col]; if(!cd) return;
-      if((cd.serverTs&&cd.serverTs>(_colServerTs[col]||0))||(cd.localTs&&cd.localTs>(_colLocalTs[col]||0))){
-        anyNewer=true; _applyCol(col,lsKey,cd);
+      var col=_COL_MAP[lsKey]; var cd=allCols[col];
+      var colDirty=false; try{ colDirty=localStorage.getItem('gp-dirty-'+lsKey)==='1'; }catch(e){}
+      var cloudServerTs=cd?(cd.serverTs||0):0;
+      var cloudLocalTs=cd?(cd.localTs||0):0;
+      var knownServerTs=_colServerTs[col]||0;
+      var knownLocalTs=_colLocalTs[col]||0;
+      var cloudIsNewer=cloudServerTs&&knownServerTs ? cloudServerTs>knownServerTs
+                      : cloudLocalTs>knownLocalTs;
+      if(cloudIsNewer){
+        _applyCol(col,lsKey,cd); anyChanged=true;
+        // If local also has dirty changes, push merged result back
+        if(colDirty) setTimeout(function(){ _pushCol(lsKey); },800);
+      } else if(colDirty){
+        _pushCol(lsKey);
       }
     });
-    if(anyNewer){
+    try{ localStorage.removeItem('gp-dirty'); }catch(e){}
+    if(anyChanged){
       try{ loadAll(); }catch(e){} try{ refreshAll(); }catch(e){} try{ renderCalendar(); }catch(e){} try{ renderFinanceiro(); }catch(e){}
       _setSyncStatus('ok'); console.log('[GP Sync] Foreground: coleções atualizadas');
     } else { console.log('[GP Sync] Foreground: local atualizado'); }
-  }).catch(function(e){ console.warn('[GP Sync] Foreground erro:',e); });
+  }).catch(function(e){
+    // No network — queue dirty collections for when connection returns
+    console.warn('[GP Sync] Foreground sem rede:',e);
+    var dirty=false; try{ dirty=localStorage.getItem('gp-dirty')==='1'; }catch(e){}
+    if(dirty) _pushAllCols();
+  });
 }
 window.addEventListener('beforeunload', _flushIfPending);
 window.addEventListener('pagehide', _flushIfPending);
@@ -3033,7 +3056,7 @@ function marcarComoPago(sid){
   if(!s)return;
   var ts=Date.now();
   var hoje=new Date().toISOString().split('T')[0];
-  pagamentos.push({id:ts+'_mp',alunoId:sid,data:hoje,valor:getPlanoValorTotal(s),forma:'Manual',obs:'Marcado como pago'});
+  pagamentos.push({id:ts+'_mp',alunoId:sid,data:hoje,valor:getPlanoValorTotal(s),forma:'Manual',obs:'Marcado como pago',updatedAt:ts});
   savePagamentos();
   renderFinanceiro();
   toast('Pagamento registrado ✓');
@@ -3041,7 +3064,7 @@ function marcarComoPago(sid){
 function excluirPagamento(pid,sid){
   var idx=pagamentos.findIndex(function(p){return p.id===pid;});
   if(idx===-1)return;
-  pagamentos[idx]=Object.assign({},pagamentos[idx],{deleted:true,deletedAt:Date.now()});
+  pagamentos[idx]=Object.assign({},pagamentos[idx],{deleted:true,deletedAt:Date.now(),updatedAt:Date.now()});
   savePagamentos();
   renderFinanceiro();
   openDetail(sid);
@@ -3051,7 +3074,7 @@ function excluirPagamentoLista(pid,tipo){
   if(!confirm('Remover este pagamento?'))return;
   var idx=pagamentos.findIndex(function(p){return p.id===pid;});
   if(idx===-1)return;
-  pagamentos[idx]=Object.assign({},pagamentos[idx],{deleted:true,deletedAt:Date.now()});
+  pagamentos[idx]=Object.assign({},pagamentos[idx],{deleted:true,deletedAt:Date.now(),updatedAt:Date.now()});
   savePagamentos();
   renderFinanceiro();
   abrirDetalheFinanceiro(tipo);
@@ -3342,7 +3365,8 @@ function saveStudent(){
     precoAvulsa:parseFloat(document.getElementById('f-preco-avulsa')&&document.getElementById('f-preco-avulsa').value)||null,
     valorUnitario:_saveValorUnitario,
     valorTotal:_saveValorTotal,
-    criadoEm:editingId?(students.find(function(x){return x.id===editingId&&!x.deleted;})||{}).criadoEm:new Date().toISOString()
+    criadoEm:editingId?(students.find(function(x){return x.id===editingId&&!x.deleted;})||{}).criadoEm:new Date().toISOString(),
+    updatedAt:Date.now()
   });
   var days=Array.from(document.querySelectorAll('#f-days-picker .day-btn.selected')).map(function(b){return parseInt(b.dataset.day);});
   if(days.length){
@@ -6512,7 +6536,8 @@ function salvarPagamento() {
     data: data,
     valor: valor,
     forma: document.getElementById('pag-forma').value,
-    obs: document.getElementById('pag-obs').value.trim()
+    obs: document.getElementById('pag-obs').value.trim(),
+    updatedAt: Date.now()
   };
   pagamentos.push(pag);
   savePagamentos();
