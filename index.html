@@ -3425,10 +3425,11 @@ function saveStudent(){
   else students.push(obj);
   save(); saveAgendas(); refreshAll();
 
-  // Manage studentInvites so aluno can auto-link on login
+  // Manage studentInvites so aluno can auto-link on login.
+  // Uses update() to preserve studentUid if the student already did first access.
   if (currentUser) {
     if (obj.email) {
-      firebase.database().ref('studentInvites/'+_encodeEmail(obj.email)).set({
+      firebase.database().ref('studentInvites/'+_encodeEmail(obj.email)).update({
         ownerUid: currentUser.uid, studentId: obj.id, createdAt: new Date().toISOString()
       });
     }
