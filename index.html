@@ -988,26 +988,32 @@ var _opsListeners = [];
 function _listenStudentOps(studentUid, studentName, appStudentId) {
   var opsRef = firebase.database().ref('studentViews/' + studentUid + '/agendaOps');
   _opsListeners.push(opsRef);
-  // Auto-apply each new op immediately — no manual review needed
   opsRef.on('child_added', function(snap) {
     var op = snap.val(); if (!op) return;
     var opId = snap.key;
-    if (op.type === 'solicitar_desmarcacao' || op.type === 'cancelar_aula') {
-      removerDeData(op.agendaId, op.data);
-      addReposicao(appStudentId, 'desmarcacao');
-      saveExcecoes(); saveReposicoes(); save();
-    } else if (op.type === 'solicitar_horario' || op.type === 'agendar_reposicao') {
-      adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'reposicao');
-      useReposicao(appStudentId, 'agendado');
-      saveExcecoes(); saveReposicoes();
-    } else if (op.type === 'agendar_livre') {
-      adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'livre');
-      saveExcecoes();
-    }
-    opsRef.child(opId).remove();
-    syncStudentView(studentUid, appStudentId, {silent: true});
-    try { renderCalendar(); } catch(e) {}
-    try { refreshAll(); } catch(e) {}
+    // Transação: deleta o op atomicamente antes de processar.
+    // Se já foi deletado por outra instância/reload, a transação aborta e o op é ignorado —
+    // isso evita duplicatas quando child_added dispara novamente antes do remove confirmar.
+    opsRef.child(opId).transaction(function(current) {
+      return current === null ? undefined : null; // undefined = abort, null = delete
+    }).then(function(result) {
+      if (!result.committed) return; // já processado por outra instância
+      if (op.type === 'solicitar_desmarcacao' || op.type === 'cancelar_aula') {
+        removerDeData(op.agendaId, op.data);
+        addReposicao(appStudentId, 'desmarcacao');
+        saveExcecoes(); saveReposicoes(); save();
+      } else if (op.type === 'solicitar_horario' || op.type === 'agendar_reposicao') {
+        adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'reposicao');
+        useReposicao(appStudentId, 'agendado');
+        saveExcecoes(); saveReposicoes();
+      } else if (op.type === 'agendar_livre') {
+        adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'livre');
+        saveExcecoes();
+      }
+      syncStudentView(studentUid, appStudentId, {silent: true});
+      try { renderCalendar(); } catch(e) {}
+      try { refreshAll(); } catch(e) {}
+    }).catch(function(e) { console.warn('[OPS] transaction failed', opId, e); });
   });
 }
 
