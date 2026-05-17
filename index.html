@@ -1000,6 +1000,9 @@ function _listenStudentOps(studentUid, studentName, appStudentId) {
       adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'reposicao');
       useReposicao(appStudentId, 'agendado');
       saveExcecoes(); saveReposicoes();
+    } else if (op.type === 'agendar_livre') {
+      adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'livre');
+      saveExcecoes();
     }
     opsRef.child(opId).remove();
     syncStudentView(studentUid, appStudentId, {silent: true});
@@ -4124,10 +4127,25 @@ function renderSlotModal(){
       out+='<p style="color:var(--white-dim);font-size:0.85rem;margin-bottom:16px;">Nenhum aluno neste hor\u00e1rio.</p>';
       if(isAluno()){
         var _rCtx=getAlunoContext(); var _rSaldo=_rCtx?getReposicoes(_rCtx.studentId):0;
+        var _rS=_rCtx?students.find(function(x){return x.id===_rCtx.studentId&&!x.deleted;}):null;
+        var _rPlano=_rS?getPlano(_rS.plano):null;
+        var _isLivreAluno=_rS&&(_rS.categoria==='flexivel'||(_rPlano&&_rPlano.tipo==='livre'));
+        var _livreDisp=0; var _aulasW=0; var _maxD=1;
+        if(_isLivreAluno&&_rPlano){
+          _maxD=_rPlano.diasSemana||1;
+          var _slotD2=new Date(slotDate+'T12:00:00'); var _dow2=_slotD2.getDay();
+          var _seg2=new Date(_slotD2); _seg2.setDate(_slotD2.getDate()+(_dow2===0?-6:1-_dow2));
+          for(var _di2=0;_di2<7;_di2++){var _cd2=new Date(_seg2);_cd2.setDate(_seg2.getDate()+_di2);var _cs2=_cd2.toISOString().split('T')[0];if(_cs2===slotDate)continue;if(getAgendasParaData(_cs2).some(function(a){return a.alunoId===_rCtx.studentId;}))_aulasW++;}
+          _livreDisp=Math.max(0,_maxD-_aulasW);
+        }
         if(_rSaldo>0){
-          out+='<button class="btn btn-primary btn-sm solicitar-slot-btn" data-date="'+slotDate+'" data-hora="'+String(agSlotHour).padStart(2,'0')+':00" style="width:100%;height:38px;font-size:0.75rem;">Agendar reposi\u00e7\u00e3o (saldo: '+_rSaldo+')</button>';
-        } else {
-          out+='<div style="text-align:center;font-size:0.78rem;color:var(--white-dim);padding:10px 0;">Sem saldo de reposi\u00e7\u00e3o dispon\u00edvel.</div>';
+          out+='<button class="btn btn-primary btn-sm solicitar-slot-btn" data-type="reposicao" data-date="'+slotDate+'" data-hora="'+String(agSlotHour).padStart(2,'0')+':00" style="width:100%;height:38px;font-size:0.75rem;">Agendar reposi\u00e7\u00e3o (saldo: '+_rSaldo+')</button>';
+        }
+        if(_livreDisp>0){
+          out+='<button class="btn btn-primary btn-sm solicitar-slot-btn" data-type="livre" data-date="'+slotDate+'" data-hora="'+String(agSlotHour).padStart(2,'0')+':00" style="width:100%;height:38px;font-size:0.75rem;'+(_rSaldo>0?'margin-top:8px;':'')+'">'+'Agendar aula ('+_aulasW+'/'+_maxD+' esta semana)</button>';
+        }
+        if(_rSaldo<=0&&_livreDisp<=0){
+          out+='<div style="text-align:center;font-size:0.78rem;color:var(--white-dim);padding:10px 0;">Sem saldo dispon\u00edvel.</div>';
         }
       }
     }
@@ -4271,14 +4289,19 @@ function renderSlotModal(){
     };
   });
 
-  // Agendar reposição — aluno only, empty slot
+  // Agendar reposição ou aula livre — aluno only, empty slot
   body.querySelectorAll('.solicitar-slot-btn').forEach(function(btn){
     btn.onclick=function(){
       var dt=btn.getAttribute('data-date'),hora=btn.getAttribute('data-hora');
-      var ctx=getAlunoContext();
-      if(!ctx||getReposicoes(ctx.studentId)<=0){toast('Sem saldo de reposição.');return;}
-      submitAgendaOp('agendar_reposicao',{data:dt,hora:hora,studentId:ctx.studentId});
-      btn.disabled=true; btn.textContent='Aguardando confirmação...';
+      var tipo=btn.getAttribute('data-type')||'reposicao';
+      var ctx=getAlunoContext(); if(!ctx) return;
+      if(tipo==='reposicao'){
+        if(getReposicoes(ctx.studentId)<=0){toast('Sem saldo de reposição.');return;}
+        submitAgendaOp('agendar_reposicao',{data:dt,hora:hora,studentId:ctx.studentId});
+      } else {
+        submitAgendaOp('agendar_livre',{data:dt,hora:hora,studentId:ctx.studentId});
+      }
+      btn.disabled=true; btn.textContent='Agendando...';
       setTimeout(function(){ closeModal('modal-slot'); },800);
     };
   });
