@@ -2957,7 +2957,7 @@ function renderPaineis(){
         +'<span style="font-size:0.72rem;font-weight:600;color:'+cor+';">'+lbl+'</span>'
         +'<div style="display:flex;gap:5px;">'
         +(ph?'<a href="https://wa.me/'+ph+'?text='+msg+'" target="_blank" class="wa-btn" style="padding:5px 9px;font-size:0.58rem;">WhatsApp</a>':'')
-        +'<button class="btn btn-primary btn-sm" onclick="renovarAluno(this.dataset.sid)" data-sid="'+s.id+'">Renovar</button>'
+        +'<button class="btn btn-primary btn-sm" onclick="abrirRenovacao(this.dataset.sid)" data-sid="'+s.id+'">Renovar ✓</button>'
         +'</div></div>';
       out+=pnlRow(avC,cor,s.nome,getPlanNome(s.plano)||'',right);
     });
@@ -3617,9 +3617,8 @@ function openDetail(id){
   if(s.status==='vencendo'||s.status==='atrasado'){
     var btnRen=document.createElement('button');
     btnRen.className='btn btn-primary'; btnRen.style.cssText='flex:1;height:40px;';
-    btnRen.textContent='Renovar (+1 mes)';
-    btnRen.onclick=function(){renovarAluno(s.id);cancelarCadastro();
-  var md=document.getElementById('modal-detail');if(md)md.style.display='none';};
+    btnRen.textContent='Renovar ✓';
+    btnRen.onclick=function(){abrirRenovacao(s.id);};
     actDiv.appendChild(btnRen);
   }
   var btnEdit=document.createElement('button');
@@ -4491,9 +4490,15 @@ function renderFinanceiro(){
       }
       var inicioTag=_isAguard&&s.inicio?'<div style="font-size:0.62rem;color:var(--accent-l);margin-top:3px;padding:3px 8px;background:rgba(74,127,165,0.08);border-radius:3px;display:inline-block;">Inicia em '+fmtDate(s.inicio)+'</div>':'';
       var venc=fmtDate(getVencimentoEfetivo(s));
-      // Bot\u00F5es
-      var btnMarcar=(!_isAguard&&!_pagouMes&&!_isPacote)?'<button class="btn btn-primary btn-sm" onclick="marcarComoPago(this.dataset.sid)" data-sid="'+sid+'">Marcar como pago</button>':'';
-      var ren=(s.status==='atrasado'||s.status==='vencendo')?'<button class="btn btn-outline btn-sm" onclick="renovarAluno(this.dataset.sid)" data-sid="'+sid+'">Renovar</button>':'';
+      // Bot\u00E3o \u00FAnico: para vencendo/atrasado usa "Renovar \u2713" (registra pagamento + renova vencimento);
+      // para os demais usa "Registrar pagamento" sem renova\u00E7\u00E3o autom\u00E1tica.
+      var ren='';
+      if(s.status==='atrasado'||s.status==='vencendo'){
+        ren='<button class="btn btn-primary btn-sm" onclick="abrirRenovacao(this.dataset.sid)" data-sid="'+sid+'">Renovar \u2713</button>';
+      } else if(!_isAguard&&!_pagouMes&&!_isPacote){
+        ren='<button class="btn btn-outline btn-sm" onclick="openPagamento(this.dataset.sid)" data-sid="'+sid+'">Registrar pagamento</button>';
+      }
+      var btnMarcar='';
       return '<div style="background:var(--card);border-radius:10px;padding:14px;margin-bottom:8px;'+leftBorder+'">'+
         '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
         +'<div style="width:38px;height:38px;border-radius:50%;background:'+avBg+';display:flex;align-items:center;justify-content:center;font-family:Raleway,sans-serif;font-size:0.62rem;font-weight:700;color:'+avColor+';flex-shrink:0;">'+_initials(s.nome)+'</div>'
@@ -6365,6 +6370,7 @@ function agendarReposicao(sid, dateStr, hora) {
 
 /* ===== PAGAMENTOS ===== */
 var pagamentos = [];
+var _pag_renovar = false; // quando true, salvarPagamento também renova o vencimento
 function loadPagamentos() {
   try { var p=localStorage.getItem('gp-pagamentos'); if(p) pagamentos=JSON.parse(p); } catch(e) {}
 }
@@ -6517,7 +6523,22 @@ function openPagamento(sid) {
   document.getElementById('pag-valor').value = getPlanoValorTotal(s) > 0 ? Math.round(getPlanoValorTotal(s)) : '';
   document.getElementById('pag-forma').value = 'Pix';
   document.getElementById('pag-obs').value = '';
-  // Fechar modal-detail antes de abrir
+  _pag_renovar = false;
+  var md = document.getElementById('modal-detail'); if(md) md.style.display='none';
+  document.getElementById('modal-pagamento').style.display='flex';
+}
+
+// Abre o modal de pagamento pré-preenchido com a data do vencimento e renova automaticamente ao salvar
+function abrirRenovacao(sid) {
+  var s = students.find(function(x){ return x.id===sid&&!x.deleted; }); if(!s) return;
+  var vef = getVencimentoEfetivo(s);
+  document.getElementById('pag-sid').value = sid;
+  document.getElementById('pag-nome').textContent = s.nome;
+  document.getElementById('pag-data').value = vef || todayStr();
+  document.getElementById('pag-valor').value = getPlanoValorTotal(s) > 0 ? Math.round(getPlanoValorTotal(s)) : '';
+  document.getElementById('pag-forma').value = 'Pix';
+  document.getElementById('pag-obs').value = '';
+  _pag_renovar = true;
   var md = document.getElementById('modal-detail'); if(md) md.style.display='none';
   document.getElementById('modal-pagamento').style.display='flex';
 }
@@ -6541,13 +6562,9 @@ function salvarPagamento() {
   pagamentos.push(pag);
   savePagamentos();
   closeModal('modal-pagamento');
-  // Perguntar se deseja renovar o plano
   var s = students.find(function(x){ return x.id===sid&&!x.deleted; });
-  if(s && (s.status==='atrasado'||s.status==='vencendo')) {
-    if(confirm('Deseja renovar o plano de '+s.nome.split(' ')[0]+' por mais 1 mês?')) {
-      renovarAluno(sid);
-    }
-  }
+  if(_pag_renovar && s) { renovarAluno(sid); }
+  _pag_renovar = false;
   toast('Pagamento registrado!');
   try{ renderDashboard(); } catch(e){}
 }
