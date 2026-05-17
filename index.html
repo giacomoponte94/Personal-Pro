@@ -4599,11 +4599,11 @@ function abrirDetalheFinanceiro(tipo){
       if(!s.plano)return false;
       var _ps=getPlano(s.plano); if(_ps&&_ps.tipo==='pacote')return false;
       if(jaPagouNoMes(s.id))return false;
-      return s.status==='atrasado'||(s.vencimento&&getDiffDias(s.vencimento)<0);
-    }).sort(function(a,b){return (a.vencimento||'').localeCompare(b.vencimento||'');});
+      return s.status==='atrasado'||(s.vencimento&&getDiffDias(getVencimentoEfetivo(s))<0);
+    }).sort(function(a,b){return (getVencimentoEfetivo(a)||'').localeCompare(getVencimentoEfetivo(b)||'');});
     if(!lista.length){rows.push('<div style="padding:16px;color:var(--white-dim);font-size:0.82rem;text-align:center;">Nenhum inadimplente.</div>');}
     lista.forEach(function(s){
-      var diff=getDiffDias(s.vencimento||'');
+      var diff=getDiffDias(getVencimentoEfetivo(s)||'');
       var sub=s.vencimento?(diff<0?'Atrasado há '+Math.abs(diff)+' dia'+(Math.abs(diff)!==1?'s':''):''):'';
       rows.push(_row(s.nome,sub,null,'var(--danger)'));
     });
@@ -6675,7 +6675,8 @@ function getCobrancasHoje(){
   return _visible(students)
     .filter(function(s){ return !isEmLicenca(s.id, ds) && (s.status==='atrasado'||s.status==='vencendo'); })
     .map(function(s){
-      var vd = s.vencimento ? new Date(s.vencimento+'T12:00:00') : null;
+      var vef = getVencimentoEfetivo(s);
+      var vd = vef ? new Date(vef+'T12:00:00') : null;
       if(vd) vd.setHours(0,0,0,0);
       return { student:s, diff: vd ? Math.ceil((vd-hoje)/86400000) : null };
     })
@@ -6766,12 +6767,13 @@ function renderDashboardDia(){
     var atrasado = s.status==='atrasado';
     var diffLabel = diff===null?'Atrasado':diff<0?Math.abs(diff)+' dias em atraso':diff===0?'Vence hoje':'Em '+diff+' dias';
     var _vCob=getPlanoValorTotal(s); var valor = _vCob>0 ? 'R$ '+_vCob.toFixed(2).replace('.',',') : '';
+    var _vefCob = getVencimentoEfetivo(s);
     var avBg = atrasado ? 'rgba(231,76,60,0.12)' : 'rgba(243,156,18,0.12)';
     r3 += '<div class="dash-row '+(atrasado?'notif-danger':'notif-warn')+'" style="margin-bottom:4px;">'
       +'<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:pointer;" onclick="openDetail(\''+s.id+'\')">'
       +'<div class="dash-avatar" style="background:'+avBg+';">'+_initials(s.nome)+'</div>'
       +'<div style="min-width:0;"><div class="dash-row-name">'+s.nome+'</div>'
-      +'<div class="dash-row-sub">'+valor+(s.vencimento?' · '+fmtDate(s.vencimento):'')+'</div></div>'
+      +'<div class="dash-row-sub">'+valor+(_vefCob?' · '+fmtDate(_vefCob):'')+'</div></div>'
       +'</div>'
       +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">'
       +'<span class="badge '+(atrasado?'badge-late':'badge-warn')+'">'+diffLabel+'</span>'
@@ -6996,15 +6998,15 @@ function renderDashboard() {
   var vencProx = _visible(students).filter(function(s){
     if(s.status==='aguardando'||!s.vencimento||!s.plano)return false;
     if(jaPagouNoMes(s.id))return false;
-    var diff=getDiffDias(s.vencimento);
+    var diff=getDiffDias(getVencimentoEfetivo(s));
     return diff>=0&&diff<=3;
-  }).sort(function(a,b){return getDiffDias(a.vencimento)-getDiffDias(b.vencimento);});
+  }).sort(function(a,b){return getDiffDias(getVencimentoEfetivo(a))-getDiffDias(getVencimentoEfetivo(b));});
 
   var vencEl = document.getElementById('dash-venc');
   if(vencEl){
     if(vencProx.length){
       var vrows = vencProx.map(function(s){
-        var diff=getDiffDias(s.vencimento);
+        var diff=getDiffDias(getVencimentoEfetivo(s));
         var label=diff===0?'vence hoje':diff===1?'vence amanhã':'vence em '+diff+' dias';
         var lColor=diff===0?'var(--danger)':diff===1?'var(--warning)':'var(--white-dim)';
         var ph=waPhone(s);
