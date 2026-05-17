@@ -4774,6 +4774,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
   auth.onAuthStateChanged(function(user) {
     if(_creatingAccount) return; // doFirstAccess owns this transition
+
+    // Always detach the aluno listener on any auth change to prevent stale
+    // Firebase callbacks from overwriting a new session's data.
+    if (_alunoViewRef) { _alunoViewRef.off(); _alunoViewRef = null; }
+    _alunoViewData = null;
+    if (typeof _opsListeners !== 'undefined') {
+      _opsListeners.forEach(function(r){ try{r.off();}catch(e){} });
+      _opsListeners = []; _pendingOps = [];
+    }
+
     if(user) {
       currentUser = user;
       _initUserRefs(user.uid);
