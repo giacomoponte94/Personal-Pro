@@ -924,6 +924,11 @@ function _initAlunoView() {
       }
     }
 
+    // Saldo de reposições — enviado pelo personal via syncStudentView
+    if (ctx && typeof sv.reposicoes === 'number') {
+      reposicoes[ctx.studentId] = sv.reposicoes;
+    }
+
     try { refreshAll(); } catch(e) {}
     try { renderDashboard(); } catch(e) {}
   }, function(err) {
@@ -966,8 +971,9 @@ function syncStudentView(studentAuthUid, appStudentId, opts) {
     if (k.indexOf(appStudentId + '_') === 0) sPres[k] = presencas[k];
   });
   var agendaWrite = ref.child('agendaReadable').set({ agendas: fullAgendas, students: fullStudents, presencas: sPres, updatedAt: Date.now() });
+  var saldoWrite = ref.child('reposicoes').set(getReposicoes(appStudentId));
 
-  return Promise.all([profileWrite, treinoWrite, agendaWrite]).then(function(){
+  return Promise.all([profileWrite, treinoWrite, agendaWrite, saldoWrite]).then(function(){
     if (!silent) toast('Dados sincronizados com o aluno.');
   }).catch(function(e){ if (!silent) toast('Erro ao sincronizar: ' + e.message); });
 }
@@ -979,13 +985,23 @@ var _opsListeners = [];
 function _listenStudentOps(studentUid, studentName, appStudentId) {
   var opsRef = firebase.database().ref('studentViews/' + studentUid + '/agendaOps');
   _opsListeners.push(opsRef);
-  opsRef.on('value', function(snap) {
-    var ops = snap.val() || {};
-    _pendingOps = _pendingOps.filter(function(op){ return op.studentUid !== studentUid; });
-    Object.keys(ops).forEach(function(opId) {
-      _pendingOps.push(Object.assign({ opId: opId, studentUid: studentUid, studentName: studentName, appStudentId: appStudentId }, ops[opId]));
-    });
-    try { renderNotifs(); } catch(e) {}
+  // Auto-apply each new op immediately — no manual review needed
+  opsRef.on('child_added', function(snap) {
+    var op = snap.val(); if (!op) return;
+    var opId = snap.key;
+    if (op.type === 'solicitar_desmarcacao' || op.type === 'cancelar_aula') {
+      removerDeData(op.agendaId, op.data);
+      addReposicao(appStudentId, 'desmarcacao');
+      saveExcecoes(); saveReposicoes(); save();
+    } else if (op.type === 'solicitar_horario' || op.type === 'agendar_reposicao') {
+      adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'reposicao');
+      useReposicao(appStudentId, 'agendado');
+      saveExcecoes(); saveReposicoes();
+    }
+    opsRef.child(opId).remove();
+    syncStudentView(studentUid, appStudentId, {silent: true});
+    try { renderCalendar(); } catch(e) {}
+    try { refreshAll(); } catch(e) {}
   });
 }
 
@@ -1048,8 +1064,7 @@ function submitAgendaOp(type, payload) {
   var opId = Date.now().toString(36) + Math.random().toString(36).slice(2);
   var entry = Object.assign({ type: type, studentUid: currentUser.uid, createdAt: new Date().toISOString() }, payload || {});
   firebase.database().ref('studentViews/' + currentUser.uid + '/agendaOps/' + opId).set(entry)
-    .then(function(){ toast('Solicitação enviada ao personal.'); })
-    .catch(function(e){ toast('Erro ao enviar solicitação: ' + e.message); });
+    .catch(function(e){ toast('Erro: ' + e.message); });
 }
 
 // One-time migration: copy gp/collections → users/{uid}/collections if user has no data yet
@@ -4105,7 +4120,12 @@ function renderSlotModal(){
     if(ags.length===0){
       out+='<p style="color:var(--white-dim);font-size:0.85rem;margin-bottom:16px;">Nenhum aluno neste hor\u00e1rio.</p>';
       if(isAluno()){
-        out+='<button class="btn btn-primary btn-sm solicitar-slot-btn" data-date="'+slotDate+'" data-hora="'+String(agSlotHour).padStart(2,'0')+':00" style="width:100%;height:38px;font-size:0.75rem;">Solicitar este hor\u00e1rio</button>';
+        var _rCtx=getAlunoContext(); var _rSaldo=_rCtx?getReposicoes(_rCtx.studentId):0;
+        if(_rSaldo>0){
+          out+='<button class="btn btn-primary btn-sm solicitar-slot-btn" data-date="'+slotDate+'" data-hora="'+String(agSlotHour).padStart(2,'0')+':00" style="width:100%;height:38px;font-size:0.75rem;">Agendar reposi\u00e7\u00e3o (saldo: '+_rSaldo+')</button>';
+        } else {
+          out+='<div style="text-align:center;font-size:0.78rem;color:var(--white-dim);padding:10px 0;">Sem saldo de reposi\u00e7\u00e3o dispon\u00edvel.</div>';
+        }
       }
     }
     var _alunoCtx=isAluno()?getAlunoContext():null;
@@ -4138,8 +4158,9 @@ function renderSlotModal(){
         +(isAluno()&&_canAct
           // Aluno view of own slot: read-only status + request buttons
           ? (presLabel?'<div style="margin-top:8px;font-size:0.8rem;color:'+bc+';">'+presLabel+'</div>':'')
-            +'<button class="btn btn-sm repos-btn" data-sid="'+s.id+'" data-agid="'+ag.id+'" data-date="'+slotDate+'" data-slot-dt="'+slotDT.toISOString()+'"'
-            +' style="width:100%;height:34px;font-size:0.72rem;margin-top:10px;background:rgba(243,156,18,0.1);border:1px solid rgba(243,156,18,0.35);color:var(--warning);">Solicitar desmarca\u00e7\u00e3o / reposi\u00e7\u00e3o</button>'
+            +(jaPassou?'':
+              '<button class="btn btn-sm repos-btn" data-sid="'+s.id+'" data-agid="'+ag.id+'" data-date="'+slotDate+'" data-slot-dt="'+slotDT.toISOString()+'"'
+              +' style="width:100%;height:34px;font-size:0.72rem;margin-top:10px;background:rgba(243,156,18,0.1);border:1px solid rgba(243,156,18,0.35);color:var(--warning);">Cancelar aula</button>')
           : !isAluno()&&_canAct
           // Personal view: full controls
           ? '<div style="display:flex;gap:8px;margin-top:10px;">'
@@ -4247,28 +4268,31 @@ function renderSlotModal(){
     };
   });
 
-  // "Solicitar horário" button — aluno only, empty slot
+  // Agendar reposição — aluno only, empty slot
   body.querySelectorAll('.solicitar-slot-btn').forEach(function(btn){
     btn.onclick=function(){
       var dt=btn.getAttribute('data-date'),hora=btn.getAttribute('data-hora');
       var ctx=getAlunoContext();
-      submitAgendaOp('solicitar_horario',{data:dt,hora:hora,studentId:ctx?ctx.studentId:''});
-      btn.disabled=true; btn.textContent='Solicitação enviada!';
+      if(!ctx||getReposicoes(ctx.studentId)<=0){toast('Sem saldo de reposição.');return;}
+      submitAgendaOp('agendar_reposicao',{data:dt,hora:hora,studentId:ctx.studentId});
+      btn.disabled=true; btn.textContent='Aguardando confirmação...';
+      setTimeout(function(){ closeModal('modal-slot'); },800);
     };
   });
 
-  // Desmarcar - gera reposi??o E remove do dia
+  // Desmarcar — remove do dia + gera reposição
   body.querySelectorAll('.repos-btn').forEach(function(btn){
     btn.onclick=function(){
-      if(btn.disabled) return; // proteção contra duplo-clique/toque
+      if(btn.disabled) return;
       var sid=btn.getAttribute('data-sid');
       if(isAluno()){
         var _c=getAlunoContext();
-        if(!_c||sid!==_c.studentId){_aclToast('Você só pode desmarcar sua própria aula.');return;}
-        // Aluno: send request to personal instead of direct write
+        if(!_c||sid!==_c.studentId){_aclToast('Você só pode cancelar sua própria aula.');return;}
         btn.disabled=true;
-        submitAgendaOp('solicitar_desmarcacao',{agendaId:btn.getAttribute('data-agid'),data:btn.getAttribute('data-date'),studentId:_c.studentId});
-        btn.textContent='Solicitação enviada!'; return;
+        submitAgendaOp('cancelar_aula',{agendaId:btn.getAttribute('data-agid'),data:btn.getAttribute('data-date'),studentId:_c.studentId});
+        btn.textContent='Cancelando...';
+        setTimeout(function(){ closeModal('modal-slot'); },800);
+        return;
       }
       btn.disabled=true;
       var agId=btn.getAttribute('data-agid');
@@ -4876,6 +4900,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if(fn==='cobrarInadimplentes()') cobrarInadimplentes();
         else if(fn==='toggleFilterHoje()') toggleFilterHoje();
         else if(fn==='verListaHoje()') verListaHoje();
+        else if(fn==='verSolicitacoes()') verSolicitacoes();
         return;
       }
       var row = e.target.closest ? e.target.closest('.st-row') : null;
