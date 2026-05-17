@@ -2678,7 +2678,6 @@ function toggleStatus(id,ns){
 function renovarAluno(id){
   var s=students.find(function(x){return x.id===id&&!x.deleted;}); if(!s)return;
   var _vefRen=getVencimentoEfetivo(s); var base=_vefRen?new Date(_vefRen+'T12:00:00'):new Date();
-  var hoje=new Date();hoje.setHours(0,0,0,0); if(base<hoje)base=new Date(hoje);
   base.setMonth(base.getMonth()+1);
   s.vencimento=base.toISOString().split('T')[0]; s.status='em dia'; s.statusManual=null;
   save(); refreshAll(); renderFinanceiro();
