@@ -600,7 +600,7 @@ td{border-bottom:1px solid var(--border);vertical-align:middle;}
         <div><label class="form-label">Obs. de sa&uacute;de</label><textarea id="f-obs" class="form-ta"></textarea></div>
         <div><label class="form-label">Objetivo</label><input type="text" id="f-obj" placeholder="Ex: Hipertrofia, Emagrecimento..." class="form-inp"></div>
         <div><label class="form-label">Plano</label><select id="f-plano" onchange="onStudentPlanoChange()" class="form-sel"><option value="">&mdash;</option></select></div>
-        <div id="f-categ-row"><label class="form-label">Categoria</label><select id="f-categ" onchange="onStudentPlanoChange()" class="form-sel"><option value="fixa">Agenda Fixa</option><option value="flexivel">Flex&iacute;vel</option><option value="mista">Mista (fixa + flex&iacute;vel)</option></select></div>
+        <div id="f-categ-row"><label class="form-label">Categoria</label><select id="f-categ" onchange="onStudentPlanoChange()" class="form-sel"><option value="fixa">Agenda Fixa</option><option value="flexivel">Flex&iacute;vel</option></select></div>
         <div id="f-preco-avulsa-row" style="display:none;"><label class="form-label">Valor da aula (R$)</label><input type="number" id="f-preco-avulsa" min="0" step="1" placeholder="Ex: 95" class="form-inp" oninput="calcValorAvulsa()"></div>
         <div id="f-qtd-row" style="display:none;"><label class="form-label">Qtd. de aulas</label><input type="number" id="f-qtd" min="1" placeholder="Ex: 10" class="form-inp" oninput="calcValorAvulsa()"></div>
         <div><label class="form-label">Modalidade</label><select id="f-modal" onchange="autoFillValor()" class="form-sel"><option value="">&mdash;</option><option value="Individual">Individual</option><option value="Duo">Duo</option></select></div>
@@ -4129,7 +4129,7 @@ function renderSlotModal(){
         var _rCtx=getAlunoContext(); var _rSaldo=_rCtx?getReposicoes(_rCtx.studentId):0;
         var _rS=_rCtx?students.find(function(x){return x.id===_rCtx.studentId&&!x.deleted;}):null;
         var _rPlano=_rS?getPlano(_rS.plano):null;
-        var _isLivreAluno=_rS&&(_rS.categoria==='flexivel'||_rS.categoria==='mista'||(_rPlano&&_rPlano.tipo==='livre'));
+        var _isLivreAluno=_rS&&_rPlano&&_rPlano.diasSemana>0;
         var _livreDisp=0; var _aulasW=0; var _maxD=1;
         if(_isLivreAluno&&_rPlano){
           _maxD=_rPlano.diasSemana||1;
@@ -4217,7 +4217,7 @@ function renderSlotModal(){
         var repS=getReposicoes(s.id);
         var temQualquerRec=agendas.some(function(a){return !a.deleted&&a.alunoId===s.id;});
         var isPacote=planoS&&planoS.tipo==='pacote';
-        var isLivre =s.categoria==='flexivel'||s.categoria==='mista';
+        var isLivre =!isPacote&&(planoS&&planoS.diasSemana>0);
         if(isPacote){
           var pk2=getAulasPacote(s.id);
           if(!pk2||pk2.restantes<=0) return null;
