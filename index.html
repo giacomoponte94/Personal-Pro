@@ -1938,13 +1938,8 @@ function getRepDoMes(sid) {
     return d.getFullYear()===y && d.getMonth()===mo;
   }).length;
 }
-var REP_LIMIT_MES = 4;
+var REP_LIMIT_MES = Infinity;
 function addReposicao(sid, motivo) {
-  var noMes = getRepDoMes(sid);
-  if(noMes >= REP_LIMIT_MES) {
-    toast('Limite de '+REP_LIMIT_MES+' reposições no mês atingido.');
-    return false;
-  }
   reposicoes[sid] = (reposicoes[sid]||0) + 1;
   saveReposicoes();
   if(!repHistorico[sid]) repHistorico[sid] = [];
@@ -1988,10 +1983,9 @@ function isEmLicenca(sid, dateStr) {
   });
 }
 function addLicenca(sid, inicio, fim) {
-  // Validate: max 7 days
   var iniD = new Date(inicio + 'T00:00:00'), fimD = new Date(fim + 'T00:00:00');
   var dias = Math.round((fimD - iniD) / 86400000) + 1;
-  if(dias < 1 || dias > 30) { toast('Licença deve ser de 1 a 30 dias corridos.'); return false; }
+  if(dias < 1) { toast('Data inválida.'); return false; }
   if(iniD > fimD) { toast('Data inicial deve ser anterior à final.'); return false; }
   // Check overlap with existing active licença
   var lics = getLicencasAluno(sid);
@@ -3730,7 +3724,7 @@ function openDetail(id){
       +'<div>'
       +'<div style="font-family:Raleway,sans-serif;font-size:0.52rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);margin-bottom:3px;">Reposições</div>'
       +'<div style="font-size:1rem;font-weight:700;color:'+(saldo>0?'var(--warning)':'var(--white-dim)')+';">'
-      +saldo+(saldo===1?' disponível':' disponíveis')+' <span style="font-size:0.65rem;font-weight:400;color:var(--white-dim);">('+noMes+'/'+REP_LIMIT_MES+' neste mês)</span></div>'
+      +saldo+(saldo===1?' disponível':' disponíveis')+' <span style="font-size:0.65rem;font-weight:400;color:var(--white-dim);">('+noMes+' neste mês)</span></div>'
       +'</div>'
       +'<button class="btn btn-outline btn-sm rep-admin-btn" style="height:30px;font-size:0.55rem;opacity:0.45;">✏ Admin</button>'
       +'</div>'
@@ -3743,7 +3737,7 @@ function openDetail(id){
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
       +'<input type="password" class="rep-admin-pass" placeholder="Senha" style="flex:1;min-width:80px;height:36px;padding:0 10px;background:var(--dark);border:1px solid var(--border);color:var(--white);border-radius:4px;font-size:0.85rem;outline:none;">'
       +'<button class="btn btn-outline btn-sm rep-minus" style="width:36px;height:36px;font-size:1rem;padding:0;" '+(saldo<=0?'disabled':'')+'>−</button>'
-      +'<button class="btn btn-outline btn-sm rep-plus" style="width:36px;height:36px;font-size:1rem;padding:0;" '+(noMes>=REP_LIMIT_MES?'disabled title="Limite do mês atingido"':'')+'><span style="pointer-events:none;">+</span></button>'
+      +'<button class="btn btn-outline btn-sm rep-plus" style="width:36px;height:36px;font-size:1rem;padding:0;"><span style="pointer-events:none;">+</span></button>'
       +'<button class="btn btn-danger btn-sm rep-zerar" style="height:36px;padding:0 10px;font-size:0.58rem;">Zerar</button>'
       +'</div>'
       +'</div>';
