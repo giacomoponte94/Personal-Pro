@@ -4330,9 +4330,9 @@ function renderSlotModal(){
       var agId=btn.getAttribute('data-agid');
       var dt=btn.getAttribute('data-date');
 
-      // Guard: se o slot já foi desmarcado (sync de outro device), não gera nova reposição
+      // Guard: só bloqueia se o slot já estava em excecoes.removidos (desmarcação real anterior).
+      // presencas[k].deleted NÃO é indicador confiável — toggle de presença também gera _presDelete().
       var k=presKey(sid,dt);
-      var jaExcluido = !!(presencas[k] && presencas[k].deleted);
       var excAtual = excecoes[dt] || {removidos:[]};
       var jaNoExcecoes = excAtual.removidos && excAtual.removidos.indexOf(agId) !== -1;
 
@@ -4343,7 +4343,7 @@ function renderSlotModal(){
       removerDeData(agId, dt);
 
       // Gerar reposição apenas se o slot ainda não havia sido desmarcado
-      if (!jaExcluido && !jaNoExcecoes) {
+      if (!jaNoExcecoes) {
         addReposicao(sid, 'desmarcacao');
       }
       savePresencas();
