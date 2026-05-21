@@ -1000,11 +1000,11 @@ function _listenStudentOps(studentUid, studentName, appStudentId) {
       if (!result.committed) return; // já processado por outra instância
       if (op.type === 'solicitar_desmarcacao' || op.type === 'cancelar_aula') {
         removerDeData(op.agendaId, op.data);
-        addReposicao(appStudentId, 'desmarcacao');
+        addReposicao(appStudentId, 'desmarcacao', {aulaDt: op.data, aulaHora: op.hora||null});
         saveExcecoes(); saveReposicoes(); save();
       } else if (op.type === 'solicitar_horario' || op.type === 'agendar_reposicao') {
         adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'reposicao');
-        useReposicao(appStudentId, 'agendado');
+        useReposicao(appStudentId, 'agendado', {targetDt: op.data, targetHora: op.hora||null});
         saveExcecoes(); saveReposicoes();
       } else if (op.type === 'agendar_livre') {
         adicionarEmData(appStudentId, op.hora || '07:00', op.data, 'livre');
@@ -1022,7 +1022,7 @@ function aplicarOp(opId) {
   if (!op) return;
   if (op.type === 'solicitar_desmarcacao') {
     removerDeData(op.agendaId, op.data);
-    addReposicao(op.appStudentId, 'desmarcacao');
+    addReposicao(op.appStudentId, 'desmarcacao', {aulaDt: op.data, aulaHora: op.hora||null});
     saveExcecoes(); saveReposicoes();
     toast(op.studentName.split(' ')[0] + ': desmarcação aplicada.');
   } else if (op.type === 'solicitar_horario') {
@@ -1939,20 +1939,24 @@ function getRepDoMes(sid) {
   }).length;
 }
 var REP_LIMIT_MES = Infinity;
-function addReposicao(sid, motivo) {
+function addReposicao(sid, motivo, extra) {
   reposicoes[sid] = (reposicoes[sid]||0) + 1;
   saveReposicoes();
   if(!repHistorico[sid]) repHistorico[sid] = [];
-  repHistorico[sid].push({tipo:'add', date:todayStr(), motivo: motivo||'manual', ts: new Date().toISOString()});
+  var entry = {tipo:'add', date:todayStr(), motivo: motivo||'manual', ts: new Date().toISOString()};
+  if(extra) { if(extra.aulaDt) entry.aulaDt=extra.aulaDt; if(extra.aulaHora) entry.aulaHora=extra.aulaHora; }
+  repHistorico[sid].push(entry);
   saveRepHistorico();
   return true;
 }
-function useReposicao(sid, motivo) {
+function useReposicao(sid, motivo, extra) {
   if ((reposicoes[sid]||0) > 0) {
     reposicoes[sid]--;
     saveReposicoes();
     if(!repHistorico[sid]) repHistorico[sid] = [];
-    repHistorico[sid].push({tipo:'use', date:todayStr(), motivo: motivo||'agendado', ts: new Date().toISOString()});
+    var entry = {tipo:'use', date:todayStr(), motivo: motivo||'agendado', ts: new Date().toISOString()};
+    if(extra) { if(extra.targetDt) entry.targetDt=extra.targetDt; if(extra.targetHora) entry.targetHora=extra.targetHora; }
+    repHistorico[sid].push(entry);
     saveRepHistorico();
     return true;
   }
@@ -3711,11 +3715,17 @@ function openDetail(id){
       var origIdx=origHist.length-1-i;
       var cor=e.tipo==='add'?'var(--warning)':'var(--success)';
       var icon=e.tipo==='add'?'+1':'−1';
-      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:0.72rem;">'
+      var detail='';
+      if(e.aulaDt){detail='Aula de '+fmtDate(e.aulaDt)+(e.aulaHora?' às '+e.aulaHora:'');}
+      else if(e.targetDt){detail='Para '+fmtDate(e.targetDt)+(e.targetHora?' às '+e.targetHora:'');}
+      return '<div style="padding:4px 0;border-bottom:1px solid var(--border);">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.72rem;">'
         +'<span style="color:'+cor+';font-weight:700;margin-right:8px;">'+icon+'</span>'
         +'<span style="flex:1;color:var(--white-dim);">'+(motLabel[e.motivo]||e.motivo)+'</span>'
         +'<span style="color:var(--white-dim);font-size:0.65rem;margin-right:4px;">'+e.date+'</span>'
         +'<button class="rep-hist-del" data-orig-idx="'+origIdx+'" style="display:none;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:3px;width:18px;height:18px;font-size:0.6rem;cursor:pointer;padding:0;line-height:1;flex-shrink:0;">✕</button>'
+        +'</div>'
+        +(detail?'<div style="font-size:0.62rem;color:var(--white-dim);opacity:0.6;padding-left:20px;margin-top:1px;">'+detail+'</div>':'')
         +'</div>';
     }).join(''):'<div style="font-size:0.7rem;color:var(--white-dim);padding:4px 0;">Sem histórico</div>';
 
@@ -4315,7 +4325,9 @@ function renderSlotModal(){
         var _c=getAlunoContext();
         if(!_c||sid!==_c.studentId){_aclToast('Você só pode cancelar sua própria aula.');return;}
         btn.disabled=true;
-        submitAgendaOp('cancelar_aula',{agendaId:btn.getAttribute('data-agid'),data:btn.getAttribute('data-date'),studentId:_c.studentId});
+        var _cIso=btn.getAttribute('data-slot-dt');
+        var _cHora=_cIso?(function(){var h=new Date(_cIso).getHours();return String(h).padStart(2,'0')+':00';})():null;
+        submitAgendaOp('cancelar_aula',{agendaId:btn.getAttribute('data-agid'),data:btn.getAttribute('data-date'),hora:_cHora,studentId:_c.studentId});
         btn.textContent='Cancelando...';
         setTimeout(function(){ closeModal('modal-slot'); },800);
         return;
@@ -4323,6 +4335,8 @@ function renderSlotModal(){
       btn.disabled=true;
       var agId=btn.getAttribute('data-agid');
       var dt=btn.getAttribute('data-date');
+      var _slotIso=btn.getAttribute('data-slot-dt');
+      var _aulaHora=_slotIso?(function(){var h=new Date(_slotIso).getHours();return String(h).padStart(2,'0')+':00';})():null;
 
       // Guard: só bloqueia se o slot já estava em excecoes.removidos (desmarcação real anterior).
       // presencas[k].deleted NÃO é indicador confiável — toggle de presença também gera _presDelete().
@@ -4338,7 +4352,7 @@ function renderSlotModal(){
 
       // Gerar reposição apenas se o slot ainda não havia sido desmarcado
       if (!jaNoExcecoes) {
-        addReposicao(sid, 'desmarcacao');
+        addReposicao(sid, 'desmarcacao', {aulaDt: dt, aulaHora: _aulaHora});
       }
       savePresencas();
 
@@ -4380,7 +4394,7 @@ function renderSlotModal(){
     // Adicionar com tipo correto
     adicionarEmData(sid,hora,slotDateAdd,tipoAdd);
     if(tipoAdd==='reposicao'){
-      useReposicao(sid, 'agendado');saveReposicoes();
+      useReposicao(sid, 'agendado', {targetDt: slotDateAdd, targetHora: hora});saveReposicoes();
       toast(nome2+': reposi\u00e7\u00e3o agendada. Restam '+getReposicoes(sid)+'.');
     } else if(tipoAdd==='pacote'){
       toast(nome2+' adicionado (pacote).');
@@ -6425,7 +6439,7 @@ function agendarReposicao(sid, dateStr, hora) {
   }
   var horaStr = String(hora).padStart(2,'0') + ':00';
   adicionarEmData(sid, horaStr, dateStr, 'reposicao'); // marca como reposição
-  useReposicao(sid, 'agendado'); // consome 1 do saldo
+  useReposicao(sid, 'agendado', {targetDt: dateStr, targetHora: horaStr}); // consome 1 do saldo
   saveReposicoes();
   closeModal('modal-reposicao');
   renderCalendar();
