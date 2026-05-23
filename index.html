@@ -560,6 +560,9 @@ td{border-bottom:1px solid var(--border);vertical-align:middle;}
           <button class="btn btn-outline" style="height:40px;" onclick="importarDados()">&#11014; Import</button>
           <button class="btn btn-outline" style="height:40px;" onclick="gerarRelatorio()">PDF</button>
         </div>
+        <div style="margin-top:8px;">
+          <button class="btn btn-outline" style="width:100%;height:40px;font-size:0.8rem;" onclick="exportarAulasMes()">&#128202; Exportar aulas do m&ecirc;s (CSV)</button>
+        </div>
         <div id="backup-status-bar" style="margin-top:10px;"></div>
       </div>
       <div id="fin-dash" style="margin-bottom:12px;"></div>
@@ -706,6 +709,20 @@ td{border-bottom:1px solid var(--border);vertical-align:middle;}
 </div>
 <div id="modal-reposicao" style="display:none;position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,0.7);z-index:500;align-items:flex-end;justify-content:center;">
   <div class="modal" style="max-width:380px;"><div class="modal-header"><div><div class="modal-title">Reposi&ccedil;&atilde;o</div><div style="font-size:0.72rem;color:var(--white-dim);" id="repos-nome"></div></div><button class="modal-close" onclick="document.getElementById('modal-reposicao').style.display='none'">&#215;</button></div><input type="hidden" id="repos-sid"><div id="repos-body"></div></div>
+</div>
+<div id="modal-export-aulas" style="display:none;position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,0.7);z-index:500;align-items:flex-end;justify-content:center;">
+  <div class="modal" style="max-width:360px;">
+    <div class="modal-header"><div class="modal-title">Exportar aulas do m&ecirc;s</div><button class="modal-close" onclick="document.getElementById('modal-export-aulas').style.display='none'">&#215;</button></div>
+    <div style="padding:0 4px 8px;">
+      <div style="font-size:0.78rem;color:var(--white-dim);margin-bottom:14px;">Selecione o m&ecirc;s e baixe um CSV com todas as aulas realizadas (exceto faltas e cancelamentos).</div>
+      <label style="font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent-l);display:block;margin-bottom:6px;">M&ecirc;s / Ano</label>
+      <input type="month" id="export-aulas-mes" style="width:100%;height:40px;background:var(--dark);border:1px solid var(--border);color:var(--white);border-radius:6px;padding:0 12px;font-size:0.9rem;outline:none;box-sizing:border-box;">
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button class="btn btn-outline" style="flex:1;height:40px;" onclick="document.getElementById('modal-export-aulas').style.display='none'">Cancelar</button>
+        <button class="btn btn-primary" style="flex:2;height:40px;" onclick="confirmarExportarAulasMes()">&#11015; Baixar CSV</button>
+      </div>
+    </div>
+  </div>
 </div>
 <div id="modal-slot-picker" style="display:none;position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,0.7);z-index:500;align-items:flex-end;justify-content:center;">
   <div class="modal" style="max-width:400px;"><div class="modal-header"><div class="modal-title">Agendar aula</div><button class="modal-close" onclick="document.getElementById('modal-slot-picker').style.display='none'">&#215;</button></div><div id="slot-picker-body"></div><div style="display:flex;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border);"><button class="btn btn-outline" style="flex:1;height:40px;" onclick="document.getElementById('modal-slot-picker').style.display='none'">Cancelar</button><button class="btn btn-primary" style="flex:2;height:40px;" onclick="confirmarSlotPicker()">Abrir hor&aacute;rio</button></div></div>
@@ -2397,6 +2414,51 @@ function exportarDados() {
   localStorage.setItem('gp-last-manual-backup',now);
   renderBackupStatus();
   toast('Backup salvo ✓');
+}
+function exportarAulasMes() {
+  var inp=document.getElementById('export-aulas-mes');
+  if(inp){var n=new Date();inp.value=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');}
+  document.getElementById('modal-export-aulas').style.display='flex';
+}
+function confirmarExportarAulasMes() {
+  var inp=document.getElementById('export-aulas-mes');
+  if(!inp||!inp.value){toast('Selecione o mês.');return;}
+  var pt=inp.value.split('-'),ano=parseInt(pt[0]),mes=parseInt(pt[1])-1;
+  var daysInMonth=new Date(ano,mes+1,0).getDate();
+  var rows=[['nome','data','horario','tipo']];
+  for(var d=1;d<=daysInMonth;d++){
+    var dateStr=ano+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    var ags=getAgendasParaData(dateStr);
+    ags.forEach(function(ag){
+      var s=students.find(function(x){return x.id===ag.alunoId&&!x.deleted;});
+      if(!s)return;
+      var pEntry=presencas[presKey(ag.alunoId,dateStr)];
+      if(pEntry&&pEntry.deleted)return; // desmarcação
+      if(_presStatus(pEntry)==='faltou')return; // faltou: não exportar
+      var np=s.nome.trim().split(/\s+/);
+      var nome=np.length>=2?np[0]+' '+np[np.length-1]:np[0];
+      var dataBR=dateStr.split('-').reverse().join('/');
+      var horario=ag.inicio||'00:00';
+      var tipo=ag.tipo==='reposicao'?'Reposição':'Regular';
+      rows.push([nome,dataBR,horario,tipo]);
+    });
+  }
+  var dataRows=rows.slice(1).sort(function(a,b){
+    var da=a[1].split('/').reverse().join('-'),db=b[1].split('/').reverse().join('-');
+    if(da!==db)return da<db?-1:1;
+    return a[2]<b[2]?-1:a[2]>b[2]?1:0;
+  });
+  var csv=[rows[0]].concat(dataRows).map(function(r){
+    return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');
+  }).join('\n');
+  var blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='aulas_'+inp.value.replace('-','_')+'.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  document.getElementById('modal-export-aulas').style.display='none';
+  toast('CSV exportado — '+(dataRows.length)+' aulas.');
 }
 function getBackupStatus() {
   var ts=localStorage.getItem('gp-last-backup');
