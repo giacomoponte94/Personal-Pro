@@ -4308,7 +4308,11 @@ function renderSlotModal(){
           var seg=new Date(slotD);seg.setDate(slotD.getDate()+(dow2===0?-6:1-dow2));
           var aulasNaSemana=0;
           for(var di=0;di<7;di++){var cd=new Date(seg);cd.setDate(seg.getDate()+di);var cs=cd.toISOString().split('T')[0];if(cs===slotDateChk)continue;if(getAgendasParaData(cs).some(function(a){return a.alunoId===s.id;}))aulasNaSemana++;}
-          if(aulasNaSemana>=maxDias) return null;
+          if(aulasNaSemana>=maxDias) {
+            // Limite semanal atingido — mas pode entrar via reposição
+            if(repS<=0) return null;
+            return {s:s,info:repS+(repS===1?' reposição':' reposições'),tipo:'reposicao'};
+          }
           return {s:s,info:aulasNaSemana+'/'+maxDias+' esta semana',tipo:'livre'};
         }
         // Plano fixo: só entra via reposição
