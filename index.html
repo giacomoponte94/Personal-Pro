@@ -1947,72 +1947,6 @@ function saveLicencas() {
 function saveFaltasCreditadas() {
   localStorage.setItem('gp-faltas-cred',JSON.stringify(faltasCreditadas)); _pushCol('gp-faltas-cred');
 }
-function faltaSlotKey(sid,dateStr,inicio){ return sid+'_'+dateStr+'_'+(inicio||'00:00'); }
-function isFaltaCreditada(sid,dateStr,inicio){ return !!faltasCreditadas[faltaSlotKey(sid,dateStr,inicio)]; }
-function marcarFaltaCreditada(sid,dateStr,inicio){ faltasCreditadas[faltaSlotKey(sid,dateStr,inicio)]=true; saveFaltasCreditadas(); }
-function desmarcarFaltaCreditada(sid,dateStr,inicio){ delete faltasCreditadas[faltaSlotKey(sid,dateStr,inicio)]; saveFaltasCreditadas(); }
-
-// Varre todas as datas passadas e credita aulas não realizadas (não comparecimento ou faltou sem crédito anterior).
-// Idempotente: faltasCreditadas previne dupla-contagem.
-function creditarFaltasHistoricas() {
-  var hojeStr=todayStr();
-  var minDate=null;
-  students.forEach(function(s){
-    if(s.deleted)return;
-    var d=s.inicio||null;
-    if(d&&(!minDate||d<minDate))minDate=d;
-  });
-  if(!minDate)return 0;
-  var ontem=new Date(hojeStr+'T12:00:00'); ontem.setDate(ontem.getDate()-1);
-  var fim=ontem;
-  var d=new Date(minDate+'T12:00:00');
-  var creditados=0;
-  var ts=new Date().toISOString();
-  while(d<=fim){
-    var dateStr=d.toISOString().split('T')[0];
-    if(!isFeriado(dateStr)){
-      var dow=d.getDay();
-      var exc=excecoes[dateStr]||{};
-      var removidos=exc.removidos||[];
-      var adicionados=exc.adicionados||[];
-      agendas.forEach(function(ag){
-        if(!ag||ag.deleted||!ag.days.includes(dow))return;
-        if(removidos.indexOf(ag.id)!==-1)return;
-        var s=students.find(function(x){return x.id===ag.alunoId&&!x.deleted;});
-        if(!s)return;
-        if(s.inicio&&s.inicio>dateStr)return;
-        if(ag.validFrom&&ag.validFrom>dateStr)return;
-        if(ag.validUntil&&ag.validUntil<=dateStr)return;
-        if(isEmLicenca(s.id,dateStr))return;
-        var ps=_presStatus(presencas[presKey(s.id,dateStr)]);
-        if(ps==='presente')return;
-        var key=faltaSlotKey(s.id,dateStr,ag.inicio);
-        if(faltasCreditadas[key])return;
-        reposicoes[s.id]=(reposicoes[s.id]||0)+1;
-        if(!repHistorico[s.id])repHistorico[s.id]=[];
-        repHistorico[s.id].push({tipo:'add',date:hojeStr,motivo:'falta',ts:ts,aulaDt:dateStr,aulaHora:ag.inicio});
-        faltasCreditadas[key]=true;
-        creditados++;
-      });
-      adicionados.forEach(function(x){
-        var s=students.find(function(st){return st.id===x.alunoId&&!st.deleted;});
-        if(!s||isEmLicenca(s.id,dateStr))return;
-        var ps=_presStatus(presencas[presKey(s.id,dateStr)]);
-        if(ps==='presente')return;
-        var key=faltaSlotKey(s.id,dateStr,x.inicio);
-        if(faltasCreditadas[key])return;
-        reposicoes[s.id]=(reposicoes[s.id]||0)+1;
-        if(!repHistorico[s.id])repHistorico[s.id]=[];
-        repHistorico[s.id].push({tipo:'add',date:hojeStr,motivo:'falta',ts:ts,aulaDt:dateStr,aulaHora:x.inicio});
-        faltasCreditadas[key]=true;
-        creditados++;
-      });
-    }
-    d.setDate(d.getDate()+1);
-  }
-  if(creditados>0){saveReposicoes();saveRepHistorico();saveFaltasCreditadas();}
-  return creditados;
-}
 function getReposicoes(sid) {
   return reposicoes[sid] || 0;
 }
@@ -4414,42 +4348,9 @@ function renderSlotModal(){
   body.querySelectorAll('.pres-btn').forEach(function(btn){
     btn.onclick=function(){
       var sid=btn.getAttribute('data-sid'),dt=btn.getAttribute('data-date'),st=btn.getAttribute('data-st');
-      var inicio=btn.getAttribute('data-inicio')||'00:00';
       if(isAluno()){var _c=getAlunoContext();if(!_c||sid!==_c.studentId){_aclToast('Você só pode marcar sua própria presença.');return;}}
       var k=presKey(sid,dt);
-      var prevSt=_presStatus(presencas[k]);
-      if(prevSt===st){
-        // Toggle off — desfaz o status
-        presencas[k]=_presDelete();
-        // Se estava marcado como faltou e havia crédito automático → reverte
-        if(st==='faltou'&&isFaltaCreditada(sid,dt,inicio)){
-          if((reposicoes[sid]||0)>0){
-            reposicoes[sid]--;
-            if(!repHistorico[sid])repHistorico[sid]=[];
-            repHistorico[sid].push({tipo:'use',date:todayStr(),motivo:'correcao_presenca',ts:new Date().toISOString(),aulaDt:dt,aulaHora:inicio});
-            saveReposicoes();saveRepHistorico();
-          }
-          desmarcarFaltaCreditada(sid,dt,inicio);
-        }
-      } else {
-        presencas[k]=_presEntry(st);
-        if(st==='faltou'){
-          // Marcar como faltou → gerar crédito se ainda não gerado
-          if(!isFaltaCreditada(sid,dt,inicio)){
-            addReposicao(sid,'falta',{aulaDt:dt,aulaHora:inicio});
-            marcarFaltaCreditada(sid,dt,inicio);
-          }
-        } else if(st==='presente'&&isFaltaCreditada(sid,dt,inicio)){
-          // Corrigir faltou → presente → devolver o crédito auto-gerado
-          if((reposicoes[sid]||0)>0){
-            reposicoes[sid]--;
-            if(!repHistorico[sid])repHistorico[sid]=[];
-            repHistorico[sid].push({tipo:'use',date:todayStr(),motivo:'correcao_presenca',ts:new Date().toISOString(),aulaDt:dt,aulaHora:inicio});
-            saveReposicoes();saveRepHistorico();
-          }
-          desmarcarFaltaCreditada(sid,dt,inicio);
-        }
-      }
+      if(_presStatus(presencas[k])===st) presencas[k]=_presDelete(); else presencas[k]=_presEntry(st);
       savePresencas();renderSlotModal();renderCalendar();renderStats();
     };
   });
@@ -5003,10 +4904,6 @@ function initApp(){
     return;
   }
   try{loadAll();}catch(e){}
-  try{
-    var _nc=creditarFaltasHistoricas();
-    if(_nc>0) setTimeout(function(){toast(_nc+' crédito'+(_nc>1?'s':'')+' por aulas não realizadas adicionado'+(_nc>1?'s':'')+' ao saldo.');},700);
-  }catch(e){}
   try{checkAutoBackup();}catch(e){}
   try{renderBackupStatus();}catch(e){}
   try{atualizarSelectsPlanos();}catch(e){}
