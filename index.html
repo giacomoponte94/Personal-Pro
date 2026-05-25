@@ -1928,12 +1928,14 @@ var reposicoes = {};
 var repHistorico = {};
 var licencas = {};
 var faltasCreditadas = {};
+var semanasCreditadas = {};
 
 function loadReposicoes() {
   try { var r=localStorage.getItem('gp-rep'); if(r) reposicoes=JSON.parse(r); } catch(e) {}
   try { var h=localStorage.getItem('gp-rep-hist'); if(h) repHistorico=JSON.parse(h); } catch(e) {}
   try { var l=localStorage.getItem('gp-lic'); if(l) licencas=JSON.parse(l); } catch(e) {}
   try { var fc=localStorage.getItem('gp-faltas-cred'); if(fc) faltasCreditadas=JSON.parse(fc); } catch(e) {}
+  try { var sc=localStorage.getItem('gp-sem-cred'); if(sc) semanasCreditadas=JSON.parse(sc); } catch(e) {}
 }
 function saveReposicoes() {
   localStorage.setItem('gp-rep',JSON.stringify(reposicoes)); _pushCol('gp-rep');
@@ -1946,6 +1948,62 @@ function saveLicencas() {
 }
 function saveFaltasCreditadas() {
   localStorage.setItem('gp-faltas-cred',JSON.stringify(faltasCreditadas)); _pushCol('gp-faltas-cred');
+}
+function saveSemanasCreditadas() {
+  localStorage.setItem('gp-sem-cred',JSON.stringify(semanasCreditadas)); _pushCol('gp-sem-cred');
+}
+function getSegundaFeira(d) {
+  var dow=d.getDay();var seg=new Date(d);seg.setDate(d.getDate()-(dow===0?6:dow-1));
+  return seg.toISOString().split('T')[0];
+}
+function _nextWeek(wStr){var d=new Date(wStr+'T12:00:00');d.setDate(d.getDate()+7);return d.toISOString().split('T')[0];}
+
+// Credita semanas passadas onde aluno de plano flexível teve menos aulas do que o plano permite.
+// Previne dupla-contagem com desmarcações (via repHistorico) e re-execuções (via semanasCreditadas).
+function creditarSemanasVazias() {
+  var hojeStr=todayStr();
+  var semanaAtualStr=getSegundaFeira(new Date(hojeStr+'T12:00:00'));
+  var creditados=0;var ts=new Date().toISOString();
+  students.forEach(function(s){
+    if(s.deleted||!s.inicio)return;
+    var planoS=getPlano(s.plano);
+    var isPacote=planoS&&planoS.tipo==='pacote';
+    if(isPacote)return;
+    var temFixo=agendas.some(function(a){return !a.deleted&&a.alunoId===s.id;});
+    var isLivreOuSemFixo=(!isPacote&&planoS&&planoS.diasSemana>0)||!temFixo;
+    if(!isLivreOuSemFixo)return;
+    var maxDias=(planoS&&planoS.diasSemana)||1;
+    var sid=s.id;
+    var wStr=getSegundaFeira(new Date(s.inicio+'T12:00:00'));
+    while(wStr<semanaAtualStr){
+      var key=sid+'_'+wStr;
+      if(semanasCreditadas[key]!==undefined){wStr=_nextWeek(wStr);continue;}
+      var scheduled=0;
+      for(var di=0;di<7;di++){
+        var cd=new Date(wStr+'T12:00:00');cd.setDate(cd.getDate()+di);
+        var cs=cd.toISOString().split('T')[0];
+        if(cs>=hojeStr)break;
+        if(getAgendasParaData(cs).some(function(a){return a.alunoId===sid;}))scheduled++;
+      }
+      var jaCreditos=(repHistorico[sid]||[]).filter(function(e){
+        if(e.tipo!=='add'||!e.aulaDt)return false;
+        return getSegundaFeira(new Date(e.aulaDt+'T12:00:00'))===wStr;
+      }).length;
+      var carryOver=Math.max(0,maxDias-scheduled-jaCreditos);
+      semanasCreditadas[key]=carryOver;
+      if(carryOver>0){
+        reposicoes[sid]=(reposicoes[sid]||0)+carryOver;
+        if(!repHistorico[sid])repHistorico[sid]=[];
+        for(var cr=0;cr<carryOver;cr++){
+          repHistorico[sid].push({tipo:'add',date:hojeStr,motivo:'semana_nao_utilizada',ts:ts,semanaInicio:wStr});
+        }
+        creditados+=carryOver;
+      }
+      wStr=_nextWeek(wStr);
+    }
+  });
+  if(creditados>0){saveReposicoes();saveRepHistorico();saveSemanasCreditadas();}
+  return creditados;
 }
 function getReposicoes(sid) {
   return reposicoes[sid] || 0;
@@ -2404,7 +2462,7 @@ function _buildExportData() {
     v:'3.0', ts:new Date().toISOString(),
     students, agendas, presencas, notasSessao,
     evolucaoData, evolucaoCargas, historicoCob, feriadosCustom,
-    bloqueios, excecoes, reposicoes, repHistorico, licencas, faltasCreditadas,
+    bloqueios, excecoes, reposicoes, repHistorico, licencas, faltasCreditadas, semanasCreditadas,
     planos:PLANOS, historicoFin, diasPermitidos, horariosConfig,
     treinosData, treinosLog, pagamentos, despesas
   };
@@ -3777,7 +3835,7 @@ function openDetail(id){
     var noMes=getRepDoMes(s.id);
     var origHist=repHistorico[s.id]||[];
     var hist=origHist.slice().reverse().slice(0,10);
-    var motLabel={'desmarcacao':'Desmarcação','manual':'Ajuste manual','agendado':'Agendada','falta':'Faltou','correcao_presenca':'Correção'};
+    var motLabel={'desmarcacao':'Desmarcação','manual':'Ajuste manual','agendado':'Agendada','falta':'Faltou','correcao_presenca':'Correção','semana_nao_utilizada':'Semana não usada'};
     var histHtml=hist.length?hist.map(function(e,i){
       var origIdx=origHist.length-1-i;
       var cor=e.tipo==='add'?'var(--warning)':'var(--success)';
@@ -3785,6 +3843,7 @@ function openDetail(id){
       var detail='';
       if(e.aulaDt){detail='Aula de '+fmtDate(e.aulaDt)+(e.aulaHora?' às '+e.aulaHora:'');}
       else if(e.targetDt){detail='Para '+fmtDate(e.targetDt)+(e.targetHora?' às '+e.targetHora:'');}
+      else if(e.semanaInicio){detail='Semana de '+fmtDate(e.semanaInicio);}
       return '<div style="padding:4px 0;border-bottom:1px solid var(--border);">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.72rem;">'
         +'<span style="color:'+cor+';font-weight:700;margin-right:8px;">'+icon+'</span>'
@@ -4908,6 +4967,10 @@ function initApp(){
     return;
   }
   try{loadAll();}catch(e){}
+  try{
+    var _nc=creditarSemanasVazias();
+    if(_nc>0) setTimeout(function(){toast(_nc+' crédito'+(_nc>1?'s':'')+' de semana'+(_nc>1?'s':'')+' não utilizada'+(_nc>1?'s':'')+' adicionado'+(_nc>1?'s':'')+' ao saldo.');},700);
+  }catch(e){}
   try{checkAutoBackup();}catch(e){}
   try{renderBackupStatus();}catch(e){}
   try{atualizarSelectsPlanos();}catch(e){}
