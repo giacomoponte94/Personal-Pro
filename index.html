@@ -3092,6 +3092,20 @@ function getMissedSessionsStreak(sid){
   }
   return streak;
 }
+// Conta sessões agendadas nos últimos 14 dias sem nenhum status registrado.
+// Alerta o personal sobre aulas não marcadas — ao contrário de getMissedSessionsStreak, ignora 'faltou' já registrado.
+function _aulasNaoMarcadas(sid){
+  var today=new Date();today.setHours(0,0,0,0);
+  var count=0;
+  for(var i=1;i<=14;i++){
+    var d=new Date(today);d.setDate(today.getDate()-i);
+    var dStr=d.toISOString().split('T')[0];
+    if(!getAgendasParaData(dStr).some(function(a){return a.alunoId===sid;}))continue;
+    if(isEmLicenca(sid,dStr))continue;
+    if(_presStatus(presencas[sid+'_'+dStr])===null)count++;
+  }
+  return count;
+}
 function getDaysAbsent(sid){var l=getLastPresenca(sid);if(!l)return null;var t=new Date();t.setHours(0,0,0,0);return Math.floor((t-l)/86400000);}
 function getAbsenceBadge(sid){
   var d=getDaysAbsent(sid); if(d===null)return '';
@@ -3223,8 +3237,8 @@ function renderNotifs(){
     var vr=inad.reduce(function(a,s){return a+getPlanoValorTotal(s);},0);
     notifs.push({p:0,icon:'',msg:'<strong>'+fmt(vr)+'</strong> em atraso \u2014 '+inad.length+' aluno'+(inad.length>1?'s':''),tipo:'danger',cta:{lbl:'Cobrar',fn:'cobrarInadimplentes()'}});
   }
-  var aus=_vs.filter(function(s){return s.status!=='atrasado'&&getMissedSessionsStreak(s.id)>=1;});
-  if(aus.length) notifs.push({p:1,icon:'!',msg:'<strong>'+aus.length+' aluno'+(aus.length>1?'s':'')+' faltando aulas agendadas</strong>',tipo:'warn',cta:null});
+  var aus=_vs.filter(function(s){return s.status!=='atrasado'&&_aulasNaoMarcadas(s.id)>=1;});
+  if(aus.length) notifs.push({p:1,icon:'!',msg:'<strong>'+aus.length+' aluno'+(aus.length>1?'s':'')+' com aulas sem registro</strong>',tipo:'warn',cta:null});
   var dow=new Date().getDay();
   var ds2=todayStr();
   if(!isHoliday(new Date())){
@@ -6848,23 +6862,26 @@ function _tlogRow(sid, date){
 }
 
 function getAcaoDoDia(){
-  // Prioridade 1: faltou sessões agendadas + inadimplente
+  // Prioridade 1: aulas sem registro + inadimplente
   var found=null;
   _visible(students).forEach(function(s){
     if(found) return;
-    var f=getMissedSessionsStreak(s.id);
-    if(f>=1&&s.status==='atrasado') found={student:s,motivo:s.nome.split(' ')[0]+' faltou '+f+(f===1?' aula agendada':' aulas agendadas')+' e est\u00e1 em atraso',acaoFn:function(){cobrarAluno(s.id);}};
+    var f=_aulasNaoMarcadas(s.id);
+    if(f>=1&&s.status==='atrasado') found={student:s,motivo:s.nome.split(' ')[0]+' tem '+f+(f===1?' aula sem registro':' aulas sem registro')+' e est\u00e1 em atraso',acaoFn:function(){cobrarAluno(s.id);}};
   });
   if(found) return found;
-  // Prioridade 2: faltou sessões agendadas
-  var risco=getAlunosEmRisco();
-  if(risco.length){ var it=risco[0],s=it.student,f=it.dias; return {student:s,motivo:s.nome.split(' ')[0]+' faltou '+f+(f===1?' aula agendada':' aulas agendadas seguidas'),acaoFn:function(){reengajarAluno(s.id);}}; }
+  // Prioridade 2: aulas passadas sem status registrado
+  var naoMarcados=_visible(students)
+    .map(function(s){return {student:s,f:_aulasNaoMarcadas(s.id)};})
+    .filter(function(it){return it.f>=1;})
+    .sort(function(a,b){return b.f-a.f;});
+  if(naoMarcados.length){var it=naoMarcados[0],s=it.student,f=it.f;return {student:s,motivo:s.nome.split(' ')[0]+' tem '+f+(f===1?' aula sem registro':' aulas sem registro'),acaoFn:function(){openDetail(s.id);}};}
   // Prioridade 3: cobrança atrasada
   var cob=_visible(students).filter(function(s){ return s.status==='atrasado'; });
   if(cob.length){ var s=cob[0]; return {student:s,motivo:s.nome.split(' ')[0]+' est\u00e1 com pagamento em atraso',acaoFn:function(){cobrarAluno(s.id);}}; }
-  // Prioridade 4: faltou ontem
+  // Prioridade 4: aula de ontem sem nenhum registro
   var ontem=getFaltaramOntem();
-  if(ontem.length){ var s=ontem[0].student; return {student:s,motivo:s.nome.split(' ')[0]+' faltou o treino ontem',acaoFn:function(){reengajarAluno(s.id);}}; }
+  if(ontem.length){ var s=ontem[0].student; return {student:s,motivo:s.nome.split(' ')[0]+' tem aula de ontem sem registro',acaoFn:function(){openDetail(s.id);}}; }
   return null;
 }
 
@@ -6926,7 +6943,7 @@ function getFaltaramOntem(){
     if(!s) return;
     if(isEmLicenca(s.id, ys)) return;
     seen[slot.alunoId] = true;
-    if(_presStatus(presencas[presKey(s.id,ys)])==='presente') return;
+    if(_presStatus(presencas[presKey(s.id,ys)])!==null) return; // já marcado (presente ou faltou) — personal já viu
     result.push({ student:s, slot:slot });
   });
   return result.sort(function(a,b){ return a.slot.inicio.localeCompare(b.slot.inicio); });
