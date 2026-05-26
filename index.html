@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Personal Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;600;700;800&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -2052,6 +2055,29 @@ function _repararCreditosFaltantes() {
   });
   if(afetados>0){saveReposicoes();saveRepHistorico();}
   return afetados;
+}
+// Pré-marca todas as semanas passadas de alunos !temFixo em semanasCreditadas.
+// Garante que qualquer versão de creditarSemanasVazias (antiga ou nova) pule essas semanas
+// e não re-adicione créditos indevidos após a migração já ter rodado.
+function _consolidarSemanasCreditadas() {
+  var hojeStr=todayStr();
+  var semanaAtualStr=getSegundaFeira(new Date(hojeStr+'T12:00:00'));
+  var alterado=false;
+  students.forEach(function(s){
+    if(s.deleted||!s.inicio)return;
+    var planoS=getPlano(s.plano);
+    if(planoS&&planoS.tipo==='pacote')return;
+    var temFixo=agendas.some(function(a){return !a.deleted&&a.alunoId===s.id;});
+    if(temFixo)return;
+    var sid=s.id;
+    var wStr=getSegundaFeira(new Date(s.inicio+'T12:00:00'));
+    while(wStr<semanaAtualStr){
+      var key=sid+'_'+wStr;
+      if(semanasCreditadas[key]===undefined){semanasCreditadas[key]=0;alterado=true;}
+      wStr=_nextWeek(wStr);
+    }
+  });
+  if(alterado)saveSemanasCreditadas();
 }
 function getReposicoes(sid) {
   return reposicoes[sid] || 0;
@@ -5035,6 +5061,7 @@ function initApp(){
     var _nc=creditarSemanasVazias();
     if(_nc>0) setTimeout(function(){toast(_nc+' crédito'+(_nc>1?'s':'')+' de semana não utilizada adicionado'+(_nc>1?'s':'')+' ao saldo.');},700);
   }catch(e){}
+  try{_consolidarSemanasCreditadas();}catch(e){}
   try{checkAutoBackup();}catch(e){}
   try{renderBackupStatus();}catch(e){}
   try{atualizarSelectsPlanos();}catch(e){}
