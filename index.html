@@ -2020,7 +2020,7 @@ function creditarSemanasVazias() {
       reposicoes[sid]=(reposicoes[sid]||0)+carryOver;
       if(!repHistorico[sid])repHistorico[sid]=[];
       for(var cr=0;cr<carryOver;cr++){
-        repHistorico[sid].push({tipo:'add',date:hojeStr,motivo:'semana_nao_utilizada',ts:ts,semanaInicio:primeiraStr});
+        repHistorico[sid].push({tipo:'add',date:hojeStr,motivo:'semana_inicio',ts:ts,semanaInicio:primeiraStr});
       }
       creditados+=carryOver;
     }
@@ -3897,7 +3897,7 @@ function openDetail(id){
     var noMes=getRepDoMes(s.id);
     var origHist=repHistorico[s.id]||[];
     var hist=origHist.slice().reverse().slice(0,10);
-    var motLabel={'desmarcacao':'Desmarcação','manual':'Ajuste manual','agendado':'Agendada','falta':'Faltou','correcao_presenca':'Correção','semana_nao_utilizada':'Semana não usada'};
+    var motLabel={'desmarcacao':'Desmarcação','manual':'Ajuste manual','agendado':'Agendada','falta':'Faltou','correcao_presenca':'Correção','semana_nao_utilizada':'Semana não usada','semana_inicio':'Semana inicial'};
     var histHtml=hist.length?hist.map(function(e,i){
       var origIdx=origHist.length-1-i;
       var cor=e.tipo==='add'?'var(--warning)':'var(--success)';
