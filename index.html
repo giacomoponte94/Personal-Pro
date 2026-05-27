@@ -4449,14 +4449,17 @@ function renderSlotModal(){
       var availComInfo=_visible(students).filter(function(s){
         return !booked.includes(s.id) && s.status!=='atrasado';
       }).map(function(s){
-        // Já está neste slot exato?
+        // Já está neste slot exato? Sempre bloqueia
         if(agsNoDia.some(function(a){return a.alunoId===s.id&&parseInt(a.inicio.split(':')[0])===agSlotHour;})) return null;
-        // Já tem aula em outro horário neste dia?
-        if(agsNoDia.some(function(a){return a.alunoId===s.id;})) return null;
         // Em licença neste dia?
         if(slotDateChk && isEmLicenca(s.id, slotDateChk)) return null;
         var planoS=getPlano(s.plano);
         var repS=getReposicoes(s.id);
+        // Já tem aula em outro horário neste dia? Bloqueia só se não tiver reposição disponível
+        var jaTemAulaNoDia=agsNoDia.some(function(a){return a.alunoId===s.id;});
+        if(jaTemAulaNoDia && repS<=0) return null;
+        // Se já tem aula no dia mas tem reposição, cai direto na lógica de reposição abaixo
+        if(jaTemAulaNoDia) return {s:s,info:repS+(repS===1?' reposição':' reposições'),tipo:'reposicao'};
         var temQualquerRec=agendas.some(function(a){return !a.deleted&&a.alunoId===s.id;});
         var isPacote=planoS&&planoS.tipo==='pacote';
         var isLivre =!isPacote&&(planoS&&planoS.diasSemana>0);
