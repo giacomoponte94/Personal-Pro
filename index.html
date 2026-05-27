@@ -2058,6 +2058,43 @@ function _repararCreditosFaltantes() {
   if(afetados>0){saveReposicoes();saveRepHistorico();}
   return afetados;
 }
+// Remove créditos duplicados de semana_inicio/semana_nao_utilizada acima do máximo permitido pelo plano.
+// Corrige o caso onde creditarSemanasVazias rodou 2x e gerou 2 entradas para a mesma semana.
+function _repararDuplicasSemanaInicio() {
+  var afetados=0;
+  students.forEach(function(s){
+    if(s.deleted||!s.inicio)return;
+    var planoS=getPlano(s.plano);
+    if(planoS&&planoS.tipo==='pacote')return;
+    var temFixo=agendas.some(function(a){return !a.deleted&&a.alunoId===s.id;});
+    if(temFixo)return;
+    var sid=s.id;
+    var maxDias=(planoS&&planoS.diasSemana)||1;
+    var primeiraStr=getSegundaFeira(new Date(s.inicio+'T12:00:00'));
+    var hist=repHistorico[sid]||[];
+    var entradas=hist.filter(function(e){
+      return e.tipo==='add'&&(e.motivo==='semana_inicio'||e.motivo==='semana_nao_utilizada')&&e.semanaInicio===primeiraStr;
+    });
+    if(entradas.length<=maxDias)return;
+    var remover=entradas.length-maxDias;
+    var removidos=0;
+    repHistorico[sid]=hist.filter(function(e){
+      if(removidos<remover&&e.tipo==='add'&&(e.motivo==='semana_inicio'||e.motivo==='semana_nao_utilizada')&&e.semanaInicio===primeiraStr){
+        removidos++;return false;
+      }
+      return true;
+    });
+    var saldo=0;
+    repHistorico[sid].forEach(function(e){
+      if(e.tipo==='add')saldo++;
+      else if(e.tipo==='use')saldo=Math.max(0,saldo-1);
+    });
+    reposicoes[sid]=saldo;
+    afetados++;
+  });
+  if(afetados>0){saveReposicoes();saveRepHistorico();}
+  return afetados;
+}
 // Pré-marca todas as semanas passadas de alunos !temFixo em semanasCreditadas.
 // Garante que qualquer versão de creditarSemanasVazias (antiga ou nova) pule essas semanas
 // e não re-adicione créditos indevidos após a migração já ter rodado.
@@ -4558,11 +4595,13 @@ function renderSlotModal(){
       var _slotIso=btn.getAttribute('data-slot-dt');
       var _aulaHora=_slotIso?(function(){var h=new Date(_slotIso).getHours();return String(h).padStart(2,'0')+':00';})():null;
 
-      // Guard: só bloqueia se o slot já estava em excecoes.removidos (desmarcação real anterior).
-      // presencas[k].deleted NÃO é indicador confiável — toggle de presença também gera _presDelete().
       var k=presKey(sid,dt);
-      var excAtual = excecoes[dt] || {removidos:[]};
-      var jaNoExcecoes = excAtual.removidos && excAtual.removidos.indexOf(agId) !== -1;
+
+      // Guard via repHistorico (source of truth): evita duplo crédito sem depender de excecoes
+      // que pode ter estado desatualizado por sync ou outras remoções.
+      var jaCredito=(repHistorico[sid]||[]).some(function(e){
+        return e.tipo==='add'&&e.motivo==='desmarcacao'&&e.aulaDt===dt;
+      });
 
       // Remover presença
       presencas[k]=_presDelete();
@@ -4570,8 +4609,8 @@ function renderSlotModal(){
       // Remover do dia via exceção (idempotente — não duplica se já existe)
       removerDeData(agId, dt);
 
-      // Gerar reposição apenas se o slot ainda não havia sido desmarcado
-      if (!jaNoExcecoes) {
+      // Gerar reposição apenas se ainda não foi creditado para esta data
+      if (!jaCredito) {
         addReposicao(sid, 'desmarcacao', {aulaDt: dt, aulaHora: _aulaHora});
       }
       savePresencas();
@@ -5058,6 +5097,7 @@ function initApp(){
   }
   try{loadAll();}catch(e){}
   try{_limparCreditosSemanaInvalidos();}catch(e){}
+  try{_repararDuplicasSemanaInicio();}catch(e){}
   try{_repararCreditosFaltantes();}catch(e){}
   try{
     var _nc=creditarSemanasVazias();
