@@ -2014,8 +2014,10 @@ function creditarSemanasVazias() {
       if(getAgendasParaData(cs).some(function(a){return a.alunoId===sid;}))scheduled++;
     }
     var jaCreditos=(repHistorico[sid]||[]).filter(function(e){
-      if(e.tipo!=='add'||!e.aulaDt)return false;
-      return getSegundaFeira(new Date(e.aulaDt+'T12:00:00'))===primeiraStr;
+      if(e.tipo!=='add')return false;
+      if(e.semanaInicio===primeiraStr)return true;
+      if(e.aulaDt&&getSegundaFeira(new Date(e.aulaDt+'T12:00:00'))===primeiraStr)return true;
+      return false;
     }).length;
     var carryOver=Math.max(0,maxDias-scheduled-jaCreditos);
     semanasCreditadas[key]=carryOver;
