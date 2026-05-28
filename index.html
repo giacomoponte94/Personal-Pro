@@ -1939,6 +1939,21 @@ function loadReposicoes() {
   try { var l=localStorage.getItem('gp-lic'); if(l) licencas=JSON.parse(l); } catch(e) {}
   try { var fc=localStorage.getItem('gp-faltas-cred'); if(fc) faltasCreditadas=JSON.parse(fc); } catch(e) {}
   try { var sc=localStorage.getItem('gp-sem-cred'); if(sc) semanasCreditadas=JSON.parse(sc); } catch(e) {}
+  // Recalcula saldo a partir do histórico para corrigir possíveis dessincronias
+  var alterado = false;
+  Object.keys(repHistorico).forEach(function(sid) {
+    var hist = repHistorico[sid] || [];
+    var saldo = 0;
+    hist.forEach(function(e) {
+      if(e.tipo === 'add') saldo++;
+      else if(e.tipo === 'use') saldo = Math.max(0, saldo - 1);
+    });
+    if(reposicoes[sid] !== saldo) {
+      reposicoes[sid] = saldo;
+      alterado = true;
+    }
+  });
+  if(alterado) try { localStorage.setItem('gp-rep', JSON.stringify(reposicoes)); } catch(e) {}
 }
 function saveReposicoes() {
   localStorage.setItem('gp-rep',JSON.stringify(reposicoes)); _pushCol('gp-rep');
@@ -2112,7 +2127,8 @@ function _consolidarSemanasCreditadas() {
     var wStr=getSegundaFeira(new Date(s.inicio+'T12:00:00'));
     while(wStr<semanaAtualStr){
       var key=sid+'_'+wStr;
-      if(semanasCreditadas[key]===undefined){semanasCreditadas[key]=0;alterado=true;}
+      var isPrimeiraSemana = wStr === getSegundaFeira(new Date(s.inicio+'T12:00:00'));
+      if(semanasCreditadas[key]===undefined && !isPrimeiraSemana){semanasCreditadas[key]=0;alterado=true;}
       wStr=_nextWeek(wStr);
     }
   });
@@ -4470,14 +4486,17 @@ function renderSlotModal(){
       var availComInfo=_visible(students).filter(function(s){
         return !booked.includes(s.id) && s.status!=='atrasado';
       }).map(function(s){
-        // Já está neste slot exato?
+        // Já está neste slot exato? Sempre bloqueia
         if(agsNoDia.some(function(a){return a.alunoId===s.id&&parseInt(a.inicio.split(':')[0])===agSlotHour;})) return null;
-        // Já tem aula em outro horário neste dia?
-        if(agsNoDia.some(function(a){return a.alunoId===s.id;})) return null;
         // Em licença neste dia?
         if(slotDateChk && isEmLicenca(s.id, slotDateChk)) return null;
         var planoS=getPlano(s.plano);
         var repS=getReposicoes(s.id);
+        // Já tem aula em outro horário neste dia? Bloqueia só se não tiver reposição disponível
+        var jaTemAulaNoDia=agsNoDia.some(function(a){return a.alunoId===s.id;});
+        if(jaTemAulaNoDia && repS<=0) return null;
+        // Se já tem aula no dia mas tem reposição, cai direto na lógica de reposição abaixo
+        if(jaTemAulaNoDia) return {s:s,info:repS+(repS===1?' reposição':' reposições'),tipo:'reposicao'};
         var temQualquerRec=agendas.some(function(a){return !a.deleted&&a.alunoId===s.id;});
         var isPacote=planoS&&planoS.tipo==='pacote';
         var isLivre =!isPacote&&(planoS&&planoS.diasSemana>0);
